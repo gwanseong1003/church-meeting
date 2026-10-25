@@ -307,7 +307,7 @@ async function runAnalyze(){
 /* ───────── AI 정리 확인·수정 (새 회의록 저장 전) ───────── */
 function editListHtml(key, arr){
   return `<div class="edit-list" id="el_${key}">${arr.map((v,i)=>`
-    <div class="item"><textarea data-k="${key}" data-i="${i}">${esc(typeof v==='string'?v:v.text)}</textarea><button class="x" onclick="removeItem('${key}',${i})">×</button></div>`).join('')}
+    <div class="item"><textarea data-k="${key}" data-i="${i}" rows="${Math.max(2,String(typeof v==='string'?v:v.text).split('\n').length+1)}">${esc(typeof v==='string'?v:v.text)}</textarea><button class="x" onclick="removeItem('${key}',${i})">×</button></div>`).join('')}
     <button class="add" onclick="addItem('${key}')">＋ 항목 추가</button></div>`;
 }
 function collectForm(d){
@@ -436,7 +436,7 @@ function copyText(){
   const d=S.current; if(!d) return;
   const lines=[`# ${d.title}`,`일시: ${fmtDate(d.date)}${d.place?'  장소: '+d.place:''}`,`참석: ${(d.attendees||[]).join(', ')}  기록: ${d.recorder||''}`,''];
   if(d.summary) lines.push(d.summary,'');
-  SECTIONS.forEach(([k,name])=>{ const arr=d[k]||[]; if(!arr.length) return; lines.push(`## ${name}`); arr.forEach(v=>lines.push('- '+(typeof v==='string'?v:v.text+(v.resolved?' (해결)':'')))); lines.push(''); });
+  SECTIONS.forEach(([k,name])=>{ const arr=d[k]||[]; if(!arr.length) return; lines.push(`## ${name}`); arr.forEach(v=>lines.push('- '+(typeof v==='string'?v:v.text+(v.resolved?' (해결)':'')).replace(/\n/g,'\n  '))); lines.push(''); });
   navigator.clipboard.writeText(lines.join('\n')).then(()=>toast('복사했습니다'),()=>toast('복사 실패'));
 }
 async function delDoc(id){
