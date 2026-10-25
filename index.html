@@ -153,7 +153,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v2.9';
+const APP_VERSION = 'v3.0';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -643,22 +643,10 @@ async function renderDetail(id){
     <div class="actions">
       <button class="btn primary" onclick="exportDocxChecked()">체크한 항목 Word 저장</button>
       <button class="btn" onclick="printChecked()">체크한 항목 인쇄 / PDF</button>
-      <button class="btn" onclick="copyText()">텍스트 복사</button>
       <button class="btn" onclick="go('edit','${d.id}')">수정</button>
       <button class="btn danger" onclick="delDoc('${d.id}')">삭제</button>
     </div>`;
   }catch(e){ $('#app').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
-}
-function copyText(){
-  const d=S.current; if(!d) return;
-  const lines=[`# ${d.title}`,`일시: ${fmtDate(d.date)}${d.place?'  장소: '+d.place:''}`,`참석: ${(d.attendees||[]).join(', ')}  기록: ${d.recorder||''}`,''];
-  if(d.summary) lines.push(d.summary,'');
-  if(d.speakers.length){ lines.push('## '+SEC.speakers); d.speakers.forEach(v=>{ const l=spLines(v.text); if(l.length>1){ lines.push(`- ${v.speaker}`); l.forEach(x=>lines.push('  - '+x)); } else lines.push(`- ${v.speaker}: ${l[0]||''}`); }); lines.push(''); }
-  if(d.topics.length){ lines.push('## '+SEC.topics); d.topics.forEach((t,i)=>{ lines.push(`### ${circ(i)} ${t.title}`); t.items.forEach(v=>lines.push('- '+v)); lines.push(''); }); }
-  if(d.proposals.length){ lines.push('## '+SEC.proposals); d.proposals.forEach((v,i)=>lines.push(`${i+1}. ${v.item} — ${v.action}`)); lines.push(''); }
-  if(d.checks.length){ lines.push('## '+SEC.checks); d.checks.forEach(v=>lines.push('- '+v)); lines.push(''); }
-  if(d.materials.length){ lines.push('## '+SEC.materials); d.materials.forEach((t,i)=>{ lines.push(`### ${circ(i)} ${t.title}${t.source?' ('+t.source+')':''}`); t.items.forEach(v=>lines.push('- '+v)); lines.push(''); }); }
-  navigator.clipboard.writeText(lines.join('\n')).then(()=>toast('복사했습니다'),()=>toast('복사 실패'));
 }
 async function delDoc(id){
   if(!confirm('이 회의록을 삭제할까요? 되돌릴 수 없습니다.')) return;
