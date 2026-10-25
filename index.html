@@ -14,6 +14,7 @@
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.5}
   header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;align-items:center;gap:10px}
   header h1{font-size:17px;margin:0;flex:1}
+  header .ver{font-size:12px;color:var(--muted);font-weight:400;margin-left:6px}
   header button{background:none;border:0;color:var(--accent);font-size:14px;padding:6px 8px;cursor:pointer}
   main{max-width:760px;margin:0 auto;padding:16px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:12px}
@@ -118,7 +119,7 @@
 </head>
 <body>
 <header>
-  <h1 id="hTitle">높은뜻안성교회 회의록</h1>
+  <h1><span id="hTitle">높은뜻안성교회 회의록</span><span class="ver" id="hVer"></span></h1>
   <button id="hBack" class="hidden" onclick="go('list')">목록</button>
   <button id="hLogout" class="hidden" onclick="logout()">로그아웃</button>
 </header>
@@ -129,6 +130,10 @@
 <script>
 /* ───────── 설정: Apps Script 웹앱 URL을 여기에 넣으세요 ───────── */
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
+
+/* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
+const APP_VERSION = 'v2.5';
+document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
 const S = {
