@@ -371,7 +371,8 @@ function analyze_(body) {
   const text = String(body.text || '').trim();
   if (!text && !(body.images || []).length) throw new Error('채록문이 비어 있습니다');
   const handouts = (body.images || []).filter(img => img.type === 'handout');
-  return analyzeCore_(text, body.meta || {}, handouts, recentForMatch_());
+  // v2.8: 관련 회의록 기능을 화면에서 뺌 → 과거 회의록 목록을 AI에 보내지 않음(토큰 절약)
+  return analyzeCore_(text, body.meta || {}, handouts, []);
 }
 
 // v2.1: 자료 종류별로 Claude에 넘긴다 — 사진은 image, PDF는 document(그림·표까지 읽음),

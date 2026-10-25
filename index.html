@@ -132,7 +132,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v2.7';
+const APP_VERSION = 'v2.8';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -258,7 +258,7 @@ function drawList(){
       <div class="t">${esc(d.title)}</div>
       <div class="m">${fmtDate(d.date)}${d.place?' · '+esc(d.place):''}${d.recorder?' · 기록 '+esc(d.recorder):''}</div>
       ${d.summary?`<div class="s">${esc(d.summary)}</div>`:''}
-      <div>${(d.topics||[]).length?`<span class="tag">주제 ${d.topics.length}</span>`:''}${(d.proposals||[]).length?`<span class="tag ok">제안 ${d.proposals.length}</span>`:''}${(d.checks||[]).length?`<span class="tag warn">확인 ${d.checks.length}</span>`:''}${(d.materials||[]).length?`<span class="tag">자료 ${d.materials.length}</span>`:''}${(d.related||[]).length?`<span class="tag">관련 ${d.related.length}</span>`:''}</div>
+      <div>${(d.topics||[]).length?`<span class="tag">주제 ${d.topics.length}</span>`:''}${(d.proposals||[]).length?`<span class="tag ok">제안 ${d.proposals.length}</span>`:''}${(d.checks||[]).length?`<span class="tag warn">확인 ${d.checks.length}</span>`:''}${(d.materials||[]).length?`<span class="tag">자료 ${d.materials.length}</span>`:''}</div>
     </div>`;
   }).join('');
 }
@@ -476,7 +476,7 @@ async function runAnalyze(){
       attendees: meta.attendees.length? meta.attendees : (a.attendees||[]), recorder: meta.recorder,
       speakers:a.speakers||[], topics:a.topics||[], proposals:a.proposals||[], checks:a.checks||[], materials:a.materials||[],
       summary:a.summary||'', keywords:a.keywords||[], related:[], rawText:text,
-      _candidates:a.relatedCandidates||[], _model:a.model
+      _model:a.model
     };
     normDoc(S.draft);
     go('review');
@@ -505,7 +505,6 @@ function collectForm(d){
   d.proposals=q('#el_proposals .pair').map(r=>({item:r.querySelector('.pi').value.trim(),action:r.querySelector('.pa').value.trim()})).filter(v=>v.item||v.action);
   d.checks=q('#el_checks textarea').map(t=>t.value.trim()).filter(Boolean);
   d.materials=q('#el_materials .topic-edit').map(r=>({title:r.querySelector('.tt').value.trim(),source:r.dataset.src||'',items:r.querySelector('.ti').value.split('\n').map(t=>t.replace(/^\s*[•\-·]\s*/,'').trim()).filter(Boolean)})).filter(v=>v.title||v.items.length);
-  d.related=q('.cand:checked').map(c=>c.value);
   return d;
 }
 function syncDraftFromForm(){ try{ collectForm(S.draft); }catch(e){} }
@@ -548,12 +547,7 @@ function formHtml(d, candidates, existingRelated, editMode){
     <h2>회의 내용</h2>
     ${Object.entries(SEC).map(([k,name])=>`<div class="sec-label">${name}</div>${k==='speakers'?`<button class="btn" style="margin:0 0 8px 8px;padding:5px 10px;font-size:13px" onclick="bulletizeSpeakers()">AI로 개조식 바꾸기</button>`:''}${editListHtml(k,d[k]||[])}${k==='materials'&&editMode?matUploadHtml():''}`).join('')}
   </div>
-  <div class="card">
-    <h2>관련 회의록</h2>
-    ${cands.length||(existingRelated||[]).length ? '' : '<p class="muted" style="margin:0">연결할 과거 회의록 제안이 없습니다.</p>'}
-    ${(existingRelated||[]).map(r=>`<div class="related-cand"><input type="checkbox" class="cand" value="${r.id}" checked><div><b>${esc(r.title)}</b> <span class="meta-line">${fmtDate(r.date)}</span></div></div>`).join('')}
-    ${cands.map(c=>`<div class="related-cand"><input type="checkbox" class="cand" value="${c.id}" checked><div><b>${esc(c.title||c.id)}</b> <span class="meta-line">${fmtDate(c.date)}</span><div class="muted">${esc(c.reason||'')}</div></div></div>`).join('')}
-  </div>`;
+`;
 }
 // 자료에서 뽑은 원문(유인물 사진 인식·PPT/문서 글자) — 길어서 접어 둠
 function extractedHtml(list){
@@ -624,9 +618,6 @@ async function renderDetail(id){
       }).join('')}</div>
       ${extractedHtml(d.attachments)}
     </div>`:''}
-    <div class="card${relDocs.length?' xi'+offc('related'):''}" data-k="related"><h2>${relDocs.length?sk('related'):''}관련 회의록</h2>
-      ${relDocs.length? relDocs.map(x=>`<div class="list-item" onclick="go('detail','${x.id}')"><div class="t">${esc(x.title)}</div><div class="m">${fmtDate(x.date)}</div>${x.summary?`<div class="s">${esc(x.summary)}</div>`:''}</div>`).join('') : '<p class="muted" style="margin:0">연결된 회의록이 없습니다.</p>'}
-    </div>
     ${d.rawText?`<div class="card"><details><summary class="muted" style="cursor:pointer">원본 채록문 보기</summary><pre class="raw" style="margin-top:8px;max-height:none">${esc(d.rawText)}</pre></details></div>`:''}
     <div class="actions">
       <button class="btn primary" onclick="exportDocxChecked()">체크한 항목 Word 저장</button>
@@ -772,8 +763,7 @@ function exportDocxChecked(){
 async function exportDocx(o={}, dOverride){
   const d=dOverride||S.current; if(!d) return;
   try{
-    const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
-    const blob=buildDocxBlob(d, relDocs, o);
+    const blob=buildDocxBlob(d, [], o);
     const safe=(d.title||'회의록').replace(/[\\/:*?"<>|\r\n]+/g,' ').trim().slice(0,40);
     const fname=`회의록_${d.date||today()}_${safe}.docx`;
     // 폰: 브라우저 다운로드는 앱(카톡 등) 안 브라우저나 문서 앱 연결 문제로 '지원하지 않는 파일'이 뜨기 쉬워
@@ -797,14 +787,8 @@ async function renderEdit(id){
   $('#hTitle').textContent='회의록 수정';
   const d = S.current && S.current.id===id ? S.current : (await api('get',{id})).item;
   S.draft = normDoc(JSON.parse(JSON.stringify(d))); S.images=[];
-  const existing=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)||{id:rid,title:rid,date:''});
-  const others=S.items.filter(x=>x.id!==id && !(d.related||[]).includes(x.id)).slice(0,30);
   $('#app').innerHTML = `
-  ${formHtml(S.draft, [], existing, true)}
-  <div class="card"><h2>관련 회의록 추가</h2>
-    <select id="addRel"><option value="">선택…</option>${others.map(x=>`<option value="${x.id}">${esc(fmtDate(x.date)+' '+x.title)}</option>`).join('')}</select>
-    <div class="actions"><button class="btn" onclick="addRelated()">연결 추가</button></div>
-  </div>
+  ${formHtml(S.draft, [], [], true)}
   <div class="card" id="attCard"></div>
   <div class="actions">
     <button class="btn" onclick="go('detail','${id}')">취소</button>
@@ -829,14 +813,6 @@ function drawAttEdit(){
     const img=!a.kind||a.kind==='image';
     return `<div class="thumb">${img?`<img src="${a.thumb}" alt="${esc(a.name)}" loading="lazy">`:fileBox(a.name,KIND_LABEL(a))}<span class="k">${img?(a.type==='handout'?'유인물':'사진'):KIND_LABEL(a)}</span><button class="x" onclick="S.draft.attachments.splice(${i},1);drawAttEdit()">×</button></div>`;
   }).join('')}</div>`:'<p class="muted" style="margin:0">첨부가 없습니다.</p>');
-}
-function addRelated(){
-  const sel=$('#addRel'); const rid=sel.value; if(!rid) return;
-  const x=S.items.find(i=>i.id===rid); if(!x) return;
-  const relCard=[...document.querySelectorAll('.card')].find(c=>c.querySelector('h2')?.textContent==='관련 회의록');
-  relCard.querySelector('p.muted')?.remove();
-  relCard.insertAdjacentHTML('beforeend',`<div class="related-cand"><input type="checkbox" class="cand" value="${x.id}" checked><div><b>${esc(x.title)}</b> <span class="meta-line">${fmtDate(x.date)}</span></div></div>`);
-  sel.querySelector(`option[value="${rid}"]`).remove(); sel.value='';
 }
 async function saveEdit(id, forceRe){
   const d=collectForm(S.draft);
