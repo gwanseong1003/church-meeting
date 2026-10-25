@@ -779,11 +779,21 @@ async function renderEdit(id){
     <select id="addRel"><option value="">선택…</option>${others.map(x=>`<option value="${x.id}">${esc(fmtDate(x.date)+' '+x.title)}</option>`).join('')}</select>
     <div class="actions"><button class="btn" onclick="addRelated()">연결 추가</button></div>
   </div>
+  <div class="card" id="attCard"></div>
   <div class="card"><h2>자료 추가</h2><p class="muted" style="margin:0 0 8px">여기서 추가한 자료는 드라이브에 보관만 됩니다(내용 정리는 위 「5. 첨부 자료 내용」에 직접 적어주세요).</p><input type="file" id="fImg" accept="${FILE_ACCEPT}" multiple onchange="addImages(this)"><div class="thumbs" id="thumbs"></div></div>
   <div class="actions">
     <button class="btn" onclick="go('detail','${id}')">취소</button>
     <button class="btn primary" style="flex:1" onclick="saveEdit('${id}')">저장</button>
   </div>`;
+  drawAttEdit();
+}
+// v2.3: 이미 저장된 첨부를 수정 화면에서 빼기(저장해야 반영, 드라이브 원본은 휴지통으로)
+function drawAttEdit(){
+  const list=S.draft.attachments||[], el=$('#attCard'); if(!el) return;
+  el.innerHTML=`<h2>저장된 첨부 ${list.length}건</h2>`+(list.length?`<p class="muted" style="margin:0 0 8px">× 를 누른 뒤 아래 「저장」을 눌러야 지워집니다. 드라이브 원본은 휴지통으로 갑니다(30일 안에 복구 가능).</p><div class="thumbs">${list.map((a,i)=>{
+    const img=!a.kind||a.kind==='image';
+    return `<div class="thumb">${img?`<img src="${a.thumb}" alt="${esc(a.name)}" loading="lazy">`:fileBox(a.name,KIND_LABEL(a))}<span class="k">${img?(a.type==='handout'?'유인물':'사진'):KIND_LABEL(a)}</span><button class="x" onclick="S.draft.attachments.splice(${i},1);drawAttEdit()">×</button></div>`;
+  }).join('')}</div>`:'<p class="muted" style="margin:0">첨부가 없습니다.</p>');
 }
 function addRelated(){
   const sel=$('#addRel'); const rid=sel.value; if(!rid) return;
@@ -798,7 +808,7 @@ async function saveEdit(id){
   try{
     busy(true,'저장 중…');
     const images=S.images.map(i=>({name:i.name,kind:i.kind,mime:i.mime,data:i.data,type:i.type,extractedText:i.extractedText||''}));
-    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related};
+    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related,attachments:d.attachments||[]};
     await api('update',{id, doc:payload, images});
     S.images=[]; toast('수정했습니다');
     const r=await api('list',{limit:300}); S.items=r.items||[];

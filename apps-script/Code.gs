@@ -240,6 +240,15 @@ function updateDoc_(body) {
   const doc = normalizeDoc_(Object.assign({}, before, body.doc || {}));
   doc.updatedAt = new Date();
 
+  // v2.3: 수정 화면에서 뺀 첨부는 드라이브에서도 휴지통으로(30일 안에 드라이브에서 복구 가능)
+  if (body.doc && Array.isArray(body.doc.attachments)) {
+    const keep = body.doc.attachments.map(a => a && a.driveFileId).filter(Boolean);
+    (before.attachments || []).forEach(a => {
+      if (a && a.driveFileId && keep.indexOf(a.driveFileId) < 0) {
+        try { DriveApp.getFileById(a.driveFileId).setTrashed(true); } catch (e) { /* 이미 지워진 파일은 무시 */ }
+      }
+    });
+  }
   if (Array.isArray(body.images) && body.images.length) {
     doc.attachments = (doc.attachments || []).concat(uploadImages_(doc.date, id, body.images));
   }
