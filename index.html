@@ -163,7 +163,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v3.3';
+const APP_VERSION = 'v3.4';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -236,8 +236,20 @@ async function api(action, payload={}){
 }
 
 /* ───────── 라우팅 ───────── */
-function go(view, arg){
-  S.view = view;
+/* v3.4: 폰 「뒤로 가기」 — 방문 기록을 두 단으로만 쓴다: [목록] ← [그 밖의 화면 하나].
+   목록에서 다른 화면으로 갈 때 한 칸 쌓고(pushState), 그 뒤 화면끼리는 바꿔치기(replaceState).
+   그래서 상세·수정·새 회의록 어디서든 뒤로 가기 = 목록. 목록에서 뒤로 가기는 앱을 나감 */
+const SUB_VIEWS=['new','review','detail','edit'];
+function go(view, arg, fromPop){
+  if(!fromPop){
+    const inSub=!!(history.state&&history.state.sub);
+    if(SUB_VIEWS.includes(view)){
+      const st={sub:1,view,arg:arg??null};
+      inSub?history.replaceState(st,''):history.pushState(st,'');
+    }else if(view==='list'&&inSub){ S._toList=true; history.back(); return; } // 목록 버튼 = 뒤로 가기와 같게
+    else history.replaceState({view},'');
+  }
+  S.view = view; S.arg = arg;
   $('#hBack').classList.toggle('hidden', view==='list' || view==='login');
   $('#hLogout').classList.toggle('hidden', view==='login');
   window.scrollTo(0,0);
@@ -948,6 +960,21 @@ async function saveEdit(id, forceRe){
     go('detail',id);
   }catch(e){ toast(e.message); } finally{ busy(false); }
 }
+
+window.addEventListener('popstate', e=>{
+  const st=e.state||{};
+  if(st.sub){ // 앞으로 가기로 다시 들어온 경우
+    if(st.view==='review'&&!S.draft) { history.back(); return; }
+    go(st.view, st.arg, true); return;
+  }
+  const toList=S._toList; S._toList=false;
+  // 쓰던 내용이 있는 화면에서 뒤로 가기 → 한 번 묻고, 취소하면 그 화면에 머문다
+  if(!toList && ['new','review','edit'].includes(S.view) && !confirm('작성 중인 내용은 저장되지 않습니다. 목록으로 갈까요?')){
+    history.pushState({sub:1,view:S.view,arg:S.arg??null},''); return;
+  }
+  if($('#overlay').classList.contains('on')) busy(false);
+  go(S.token?'list':'login', null, true);
+});
 
 /* ───────── 시작 ───────── */
 go(S.token ? 'list' : 'login');
