@@ -132,7 +132,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v2.6';
+const APP_VERSION = 'v2.7';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -229,7 +229,7 @@ async function doLogin(){
 
 /* ───────── 목록 ───────── */
 async function renderList(){
-  $('#hTitle').textContent='회의록';
+  $('#hTitle').textContent='높은뜻안성교회 회의록';
   $('#app').innerHTML = `
     <div class="actions" style="margin:0 0 12px">
       <button class="btn primary" onclick="go('new')">＋ 새 회의록</button>
@@ -589,7 +589,7 @@ async function saveNew(){
 
 /* ───────── 상세 ───────── */
 async function renderDetail(id){
-  $('#hTitle').textContent='회의록';
+  $('#hTitle').textContent='높은뜻안성교회 회의록';
   $('#app').innerHTML='<div class="empty">불러오는 중…</div>';
   try{
     const r=await api('get',{id}); const d=normDoc(r.item); S.current=d;
