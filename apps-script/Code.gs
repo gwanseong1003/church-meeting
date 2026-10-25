@@ -48,7 +48,6 @@ function doPost(e) {
       case 'save':    return json_({ ok: true, id: saveDoc_(body) });
       case 'update':  return json_({ ok: true, id: updateDoc_(body) });
       case 'delete':  deleteDoc_(body.id); return json_({ ok: true });
-      case 'resolve': return json_({ ok: true, item: resolveFollowup_(body) });
       default:        return json_({ ok: false, error: '알 수 없는 요청: ' + action });
     }
   } catch (err) {
@@ -199,13 +198,11 @@ function normalizeDoc_(d) {
     place: String(d.place || '').trim(),
     attendees: arr(d.attendees),
     recorder: String(d.recorder || '').trim(),
-    notices: arr(d.notices),
-    discussions: arr(d.discussions),
-    followups: arr(d.followups).map(f => typeof f === 'string'
-      ? { text: f, resolved: false, resolvedBy: '' }
-      : { text: String(f.text || ''), resolved: !!f.resolved, resolvedBy: String(f.resolvedBy || '') }),
-    decisions: arr(d.decisions),
-    etc: arr(d.etc),
+    // 본문 4단 (샘플 양식): 개인별 발언 → 주제별 → 종합 제안 → 확인 필요
+    speakers: arr(d.speakers).map(x => typeof x === 'string' ? { speaker: '', text: x } : { speaker: String(x.speaker || ''), text: String(x.text || '') }).filter(x => x.speaker || x.text),
+    topics: arr(d.topics).map(x => typeof x === 'string' ? { title: x, items: [] } : { title: String(x.title || ''), items: arr(x.items).map(String) }).filter(x => x.title || x.items.length),
+    proposals: arr(d.proposals).map(x => typeof x === 'string' ? { item: x, action: '' } : { item: String(x.item || ''), action: String(x.action || '') }).filter(x => x.item || x.action),
+    checks: arr(d.checks).map(x => typeof x === 'string' ? x : String(x.text || '')).filter(Boolean),
     summary: String(d.summary || '').trim(),
     keywords: arr(d.keywords),
     related: arr(d.related),
@@ -267,16 +264,6 @@ function linkRelated_(id, nowRelated, beforeRelated) {
   });
 }
 
-function resolveFollowup_(body) {
-  const doc = getDoc_(body.id);
-  const f = doc.followups || [];
-  const i = Number(body.index);
-  if (!f[i]) throw new Error('해당 추후논의 항목이 없습니다');
-  f[i] = { text: f[i].text, resolved: !!body.resolved, resolvedBy: String(body.resolvedBy || '') };
-  patchDoc_(body.id, { followups: f, updatedAt: new Date() });
-  return getDoc_(body.id);
-}
-
 // ───────────────────────────── 드라이브 ─────────────────────────────
 
 function rootFolder_() {
@@ -314,34 +301,38 @@ function uploadImages_(date, docId, images) {
 // ───────────────────────────── Claude ─────────────────────────────
 
 const SYSTEM_PROMPT = [
-  '당신은 한국어 회의록 정리 도우미입니다. 스마트폰 음성 변환으로 만든 회의 채록문을 받아 구조화된 회의록 JSON을 만듭니다.',
+  '당신은 한국어 회의록 정리 도우미입니다. 스마트폰 음성 변환으로 만든 회의 채록문을 받아, 아래 4단 구성의 회의록 JSON을 만듭니다.',
+  '채록문은 "발화자 1 (00:36)" 같은 줄로 발화자가 구분되어 있습니다.',
   '',
-  '규칙:',
+  '공통 규칙:',
   '1. 채록문에 있는 내용만 쓰고 추측으로 채우지 않는다. 없는 항목은 빈 배열로 둔다.',
-  '2. 발언자는 추정하지 않는다. 채록문에 화자 구분이 없다.',
-  '3. 음성 변환 오타로 보이는 고유명사(사람·장소·단체 이름)는 뒤에 [?]를 붙인다.',
-  '4. 분류:',
-  '   - notices(공지): 전달·안내 사항. 논의 없이 알린 것.',
-  '   - discussions(토의사항): 의견을 주고받은 안건마다 한 항목. 결론이 났든 안 났든 논의 과정을 여기에 자세히 남긴다.',
-  '   - followups(추후논의): 다음에 다시 다루기로 한 것, 확인 후 결정하기로 한 것.',
-  '   - decisions(결정): 확정된 사항. 담당자·기한이 있으면 포함.',
-  '   - etc(기타): 위에 안 들어가는 것.',
-  '   결론(결정·추후논의)은 decisions·followups에 따로 쓰고, 토의사항에는 그 결론에 이른 과정을 쓴다. 공지·결정·추후논의끼리는 겹쳐 쓰지 않는다.',
-  '5. 공지·추후논의·결정·기타 항목은 1~2문장, 평서문, 존대 없이 개조식으로 쓴다. 예: "11월 둘째 주 토요일 리허설 진행, 장소는 강당"',
-  '6. 토의사항은 자세히 쓴다. 한 항목은 여러 줄 문자열(줄바꿈 \\n)로, 형식은 다음과 같다.',
-  '   첫 줄: 안건명 — 한 줄 요지',
-  '   다음 줄들: "· 현황: …", "· 의견: …", "· 쟁점: …", "· 결론: …" 중 해당하는 것만. 의견이 여럿이면 "· 의견: …" 줄을 의견마다 따로 쓴다.',
-  '   채록문에 나온 숫자·날짜·금액·인원·장소·대안·찬반 이유 같은 구체적 내용은 빠뜨리지 말고 남긴다. 같은 말 반복이나 잡담은 뺀다.',
-  '   결론이 없으면 "· 결론: 결정 없음" 또는 "· 결론: 추후논의"로 적는다. 안건 하나는 보통 3~8줄.',
-  '   예: "성탄 행사 장소 — 본당과 교육관 중 논의\\n· 현황: 작년 본당 사용, 좌석 부족(약 30명 서서 관람)\\n· 의견: 교육관은 좌석 여유 있으나 음향 장비 이동 필요\\n· 의견: 본당 유지하고 2부제로 나누자는 의견\\n· 결론: 추후논의(음향 이동 비용 확인 후)"',
-  '7. 유인물 이미지가 있으면 본문 텍스트를 그대로 옮기고 표는 줄 단위로 정리해 handoutText에 넣는다. 유인물 내용이 회의 내용과 겹치면 회의록 항목에도 반영한다.',
-  '8. summary는 회의 전체를 한 문장(60자 이내)으로. keywords는 핵심어 5~10개(단체명·행사명·안건명 위주).',
-  '9. date·place·attendees는 채록문이나 유인물에서 확인되는 경우에만 채우고, 사용자가 준 값이 있으면 그 값을 우선한다.',
-  '10. recentMeetings 목록이 주어지면, 이번 회의의 추후논의·결정과 이어지는 과거 회의만 relatedCandidates에 넣고 reason에 근거를 한 줄 적는다. 관련 없으면 빈 배열.',
-  '11. 출력은 JSON 하나만. 설명·코드펜스 없이 JSON 객체만 출력한다.',
+  '2. 발화자 이름은 추정하지 않는다. 채록문의 라벨("발화자 1", "발화자 2"…)을 그대로 쓴다. 자기소개가 있어도 이름으로 바꾸지 않는다.',
+  '3. 음성 변환 오타로 보이는 고유명사(사람·장소·단체·프로그램 이름)는 가장 그럴듯한 표기로 쓰되 뒤에 [?]를 붙이고, checks에도 적는다.',
+  '4. 문체: 평서문, 존대 없이 개조식. "~함", "~필요", "~제안" 식으로 끝맺는다. 같은 말 반복·추임새·잡담은 뺀다.',
+  '5. 채록문에 나온 숫자·날짜·금액·인원·장소·대안·찬반 이유 같은 구체 내용은 빠뜨리지 않는다.',
+  '',
+  '구성:',
+  'A. speakers (개인별 발언 정리): 발화자마다 한 항목. speaker는 라벨 그대로("발화자 3"), text에는 그 사람이 회의 전체에서 말한 내용을 요약한다.',
+  '   - 주장·제안·근거·구체 수치를 담고, 여러 주제를 말했으면 주제 순서대로 문장을 이어 쓴다. 긴 발언자는 5~10문장, 짧은 발언자는 1~2문장.',
+  '   - 진행자(보통 발화자 1)는 진행 멘트·순서 안내는 빼고 내용 있는 발언만 요약한다.',
+  '   - 맞장구·대답("네", "아 그거구나")만 한 발화자는 넣지 않는다.',
+  '   - 발화자 번호 순으로 정렬한다.',
+  'B. topics (주제별 정리): 회의 내용을 주제로 묶어 4~10개. title은 "팀 편성·연령차"처럼 짧은 명사구.',
+  '   - items는 한 줄짜리 문장 배열. 각 줄 끝에 출처를 "(발화자 3)" 형식으로 붙인다. 여럿이 같은 말을 했으면 "(발화자 1, 3)".',
+  '   - 그 주제에서 결론·공통 제안이 나왔으면 마지막 줄을 "→ "로 시작해 적는다. 예: "→ 공통 제안: 저학년/고학년 분리 편성"',
+  '   - 같은 사실을 speakers에 썼더라도 topics에 다시 쓴다(보는 목적이 다름).',
+  'C. proposals (종합 제안): 회의에서 나온 결정·제안·다음 할 일을 표 형식으로. item은 짧은 명사구(예: "학년별 분리 편성"), action은 구체 실행 내용(담당·기한·수치가 있으면 포함). 보통 3~8개. 회의에서 안 나온 것을 지어내지 않는다.',
+  'D. checks (확인이 필요한 사항): 음성 변환 판독이 불확실해 추정으로 적은 부분. 어느 발화자의 어떤 말인지 짚어서 한 줄씩. 예: "발화자 5의 \'다돌 돌봄센터\'가 맞는 명칭인지 확인 필요". 없으면 빈 배열.',
+  '',
+  '그 밖의 항목:',
+  '6. 유인물 이미지가 있으면 본문 텍스트를 그대로 옮기고 표는 줄 단위로 정리해 handoutText에 넣는다. 유인물 내용이 회의 내용과 겹치면 topics·proposals에도 반영한다.',
+  '7. summary는 회의 전체를 한 문장(60자 이내)으로. keywords는 핵심어 5~10개(단체명·행사명·안건명 위주).',
+  '8. date·place·attendees는 채록문이나 유인물에서 확인되는 경우에만 채우고, 사용자가 준 값이 있으면 그 값을 우선한다.',
+  '9. recentMeetings 목록이 주어지면, 이번 회의의 제안·주제와 이어지는 과거 회의만 relatedCandidates에 넣고 reason에 근거를 한 줄 적는다. 관련 없으면 빈 배열.',
+  '10. 출력은 JSON 하나만. 설명·코드펜스 없이 JSON 객체만 출력한다.',
   '',
   '출력 스키마:',
-  '{"date":"YYYY-MM-DD 또는 빈 문자열","place":"","attendees":[],"notices":[],"discussions":[],"followups":[],"decisions":[],"etc":[],"summary":"","keywords":[],"handoutText":[{"index":0,"text":""}],"relatedCandidates":[{"id":"","reason":""}]}',
+  '{"date":"YYYY-MM-DD 또는 빈 문자열","place":"","attendees":[],"speakers":[{"speaker":"발화자 1","text":""}],"topics":[{"title":"","items":[""]}],"proposals":[{"item":"","action":""}],"checks":[""],"summary":"","keywords":[],"handoutText":[{"index":0,"text":""}],"relatedCandidates":[{"id":"","reason":""}]}',
 ].join('\n');
 
 function analyze_(body) {
@@ -396,8 +387,8 @@ function recentForMatch_() {
       title: d.title,
       summary: d.summary,
       keywords: d.keywords || [],
-      openFollowups: (d.followups || []).filter(f => !f.resolved).map(f => f.text),
-      decisions: (d.decisions || []).slice(0, 5),
+      proposals: (d.proposals || []).slice(0, 8).map(p => p.item),
+      topics: (d.topics || []).map(t => t.title),
     }));
   } catch (e) {
     return [];

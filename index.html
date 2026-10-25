@@ -37,18 +37,30 @@
   .tag{display:inline-block;background:var(--accent-soft);color:var(--accent);font-size:12px;padding:2px 8px;border-radius:999px;margin:2px 4px 0 0}
   .tag.warn{background:#fbf1dd;color:var(--warn)}
   .tag.ok{background:#e4f2e8;color:var(--ok)}
-  .sec,.sec-h,.sec-label{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .sec{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--c);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
-  .sec-h{display:flex;align-items:center;gap:8px;background:var(--cs);color:var(--c);font-weight:700;font-size:16px;padding:10px 14px}
-  .sec-h .n{font-size:12px;font-weight:700;background:#fff;color:var(--c);border-radius:999px;padding:1px 9px}
-  .sec .items{padding:2px 14px 4px}
-  .sec .items li .txt .head{display:block;font-weight:700}
-  .sec-label{display:inline-block;color:var(--c);background:var(--cs);border-left:4px solid var(--c);padding:4px 10px;border-radius:6px;font-size:14px;font-weight:700;margin:18px 0 8px}
+  /* 회의록 문서 보기(샘플 양식: 제목 → 소개 → 1.개인별 발언 표 → 2.주제별 → 3.종합 제안 표 → 4.확인 필요) */
+  .doc-title{text-align:center;color:var(--accent);font-size:22px;margin:4px 0 4px}
+  .doc-sub{text-align:center;color:var(--muted);font-size:14px}
+  .doc-intro{border-top:1px solid var(--line);margin:14px 0 0;padding-top:12px;font-size:14px;color:#444}
+  .sec-t{color:var(--accent);font-size:17px;margin:0 0 10px}
+  .tb{width:100%;border-collapse:collapse;font-size:14px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .tb th,.tb td{border:1px solid #9a9a9a;padding:8px 10px;vertical-align:top;text-align:left}
+  .tb th{background:#dce6f1;font-weight:700}
+  .tb td{white-space:pre-wrap}
+  .tb td.k{background:#f3f2ee;font-weight:700;white-space:nowrap}
+  .tb td.n{text-align:center;font-weight:700;width:44px}
+  .topic{color:#3a74b0;font-size:15px;margin:14px 0 4px;font-weight:700}
+  .bul{margin:0;padding-left:20px}
+  .bul li{margin:4px 0;white-space:pre-wrap}
+  .sec-label{display:inline-block;color:var(--accent);background:var(--accent-soft);border-left:4px solid var(--accent);padding:4px 10px;border-radius:6px;font-size:14px;font-weight:700;margin:18px 0 8px}
+  .edit-list .pair{display:grid;grid-template-columns:110px 1fr 36px;gap:6px;margin-bottom:6px}
+  .edit-list .pair input{min-width:0}
+  .topic-edit{border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:8px;background:#fafaf8}
+  .topic-edit .item{margin-bottom:4px}
+  .topic-edit textarea{width:100%;min-height:80px}
   .items{list-style:none;padding:0;margin:0}
   .items li{padding:8px 0;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:flex-start}
   .items li:last-child{border-bottom:0}
   .items li .txt{flex:1;white-space:pre-wrap}
-  .items li.resolved .txt{color:var(--muted);text-decoration:line-through}
   .edit-list .item{display:flex;gap:6px;margin-bottom:6px}
   .edit-list textarea{min-height:44px;flex:1}
   .edit-list .x{border:1px solid var(--line);background:#fff;border-radius:8px;width:36px;cursor:pointer;color:var(--muted)}
@@ -76,12 +88,13 @@
   .hidden{display:none!important}
   .checkline{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px}
   .link{color:var(--accent);text-decoration:none;cursor:pointer}
-  @media (max-width:480px){.row{flex-direction:column;gap:0}}
+  @media (max-width:480px){.row{flex-direction:column;gap:0}.edit-list .pair{grid-template-columns:1fr 36px}.edit-list .pair textarea{grid-column:1/3}}
   @media print{
     header,.actions,.toast,.overlay,details summary{display:none!important}
     body{background:#fff;font-size:12pt}
     main{max-width:none;padding:0}
     .card{border:0;padding:0 0 8px;break-inside:avoid-page}
+    .tb tr{break-inside:avoid}
     .thumbs,input[type=checkbox]{display:none}
     details:not([open])>*:not(summary){display:none}
   }
@@ -110,22 +123,19 @@ const S = {
   images: [],        // {name,mime,data(base64),type,preview}
   view: 'list',
 };
-const SECTIONS = [
-  ['notices','공지'],['discussions','토의사항'],['followups','추후논의'],['decisions','결정'],['etc','기타']
-];
-// 섹션 색: [진한색, 옅은 배경]
-const SEC_COLOR = {
-  notices:['#2d5d8f','#e6eef7'], discussions:['#6b4fa0','#efeaf7'], followups:['#a06b11','#fbf1dd'],
-  decisions:['#2f7a4b','#e4f2e8'], etc:['#6b6a66','#efeeea']
-};
-const secStyle = k => `--c:${SEC_COLOR[k][0]};--cs:${SEC_COLOR[k][1]}`;
-// 토의사항은 첫 줄(안건명)을 굵게
-function itemHtml(k, text){
-  const t=String(text??'');
-  if(k!=='discussions' || !t.includes('\n')) return esc(t);
-  const i=t.indexOf('\n');
-  return `<span class="head">${esc(t.slice(0,i))}</span>${esc(t.slice(i+1))}`;
+// 회의록 본문 4단 구성 (샘플 양식)
+const SEC = { speakers:'1. 개인별 발언 정리', topics:'2. 주제별 정리', proposals:'3. 종합 제안', checks:'4. 확인이 필요한 사항' };
+const CIRC='①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
+const circ=i=>CIRC[i]||`(${i+1})`;
+// 저장된 문서/AI 결과를 한 형태로 맞춤 (문자열만 들어온 옛 데이터도 받아줌)
+function normDoc(d){
+  d.speakers=(d.speakers||[]).map(x=>typeof x==='string'?{speaker:'',text:x}:{speaker:String(x.speaker||''),text:String(x.text||'')});
+  d.topics=(d.topics||[]).map(x=>typeof x==='string'?{title:x,items:[]}:{title:String(x.title||''),items:(x.items||[]).map(v=>String(v??''))});
+  d.proposals=(d.proposals||[]).map(x=>typeof x==='string'?{item:x,action:''}:{item:String(x.item||''),action:String(x.action||'')});
+  d.checks=(d.checks||[]).map(v=>typeof v==='string'?v:String(v.text||''));
+  return d;
 }
+function introText(d){ return `본 문서는 ${fmtDate(d.date)} ${d.title||'회의'}의 녹음 채록문을 AI로 정리한 것입니다. 개인별 발언 정리, 주제별 정리, 종합 제안, 확인이 필요한 사항의 순서로 구성하였습니다.`; }
 
 /* ───────── 유틸 ───────── */
 const $ = s => document.querySelector(s);
@@ -156,7 +166,7 @@ function go(view, arg){
   $('#hBack').classList.toggle('hidden', view==='list' || view==='login');
   $('#hLogout').classList.toggle('hidden', view==='login');
   window.scrollTo(0,0);
-  ({login:renderLogin, list:renderList, new:renderNew, review:renderReview, detail:renderDetail, edit:renderEdit, followups:renderFollowups})[view](arg);
+  ({login:renderLogin, list:renderList, new:renderNew, review:renderReview, detail:renderDetail, edit:renderEdit})[view](arg);
 }
 function logout(ask=true){
   if (ask && !confirm('로그아웃할까요?')) return;
@@ -191,7 +201,6 @@ async function renderList(){
   $('#app').innerHTML = `
     <div class="actions" style="margin:0 0 12px">
       <button class="btn primary" onclick="go('new')">＋ 새 회의록</button>
-      <button class="btn" onclick="go('followups')">미결 추후논의</button>
     </div>
     <div class="search"><input type="text" id="q" placeholder="제목·참석자·내용 검색" oninput="drawList()"></div>
     <div id="listBox"><div class="empty">불러오는 중…</div></div>`;
@@ -204,7 +213,8 @@ async function renderList(){
 function matches(d,q){
   if(!q) return true;
   const hay=[d.title,d.date,d.place,d.recorder,d.summary,...(d.attendees||[]),...(d.keywords||[]),
-    ...SECTIONS.flatMap(([k])=>(d[k]||[]).map(x=>typeof x==='string'?x:x.text))].join(' ').toLowerCase();
+    ...(d.speakers||[]).map(x=>x.text||x),...(d.topics||[]).flatMap(t=>[t.title,...(t.items||[])]),
+    ...(d.proposals||[]).flatMap(x=>[x.item,x.action]),...(d.checks||[])].join(' ').toLowerCase();
   return q.toLowerCase().split(/\s+/).filter(Boolean).every(w=>hay.includes(w));
 }
 function drawList(){
@@ -212,12 +222,11 @@ function drawList(){
   const rows=S.items.filter(d=>matches(d,q));
   if(!rows.length){ $('#listBox').innerHTML=`<div class="empty">${S.items.length?'검색 결과가 없습니다':'아직 회의록이 없습니다. 새 회의록을 만들어보세요.'}</div>`; return; }
   $('#listBox').innerHTML = rows.map(d=>{
-    const open=(d.followups||[]).filter(f=>!f.resolved).length;
     return `<div class="list-item" onclick="go('detail','${d.id}')">
       <div class="t">${esc(d.title)}</div>
       <div class="m">${fmtDate(d.date)}${d.place?' · '+esc(d.place):''}${d.recorder?' · 기록 '+esc(d.recorder):''}</div>
       ${d.summary?`<div class="s">${esc(d.summary)}</div>`:''}
-      <div>${(d.decisions||[]).length?`<span class="tag ok">결정 ${d.decisions.length}</span>`:''}${open?`<span class="tag warn">미결 ${open}</span>`:''}${(d.related||[]).length?`<span class="tag">관련 ${d.related.length}</span>`:''}</div>
+      <div>${(d.topics||[]).length?`<span class="tag">주제 ${d.topics.length}</span>`:''}${(d.proposals||[]).length?`<span class="tag ok">제안 ${d.proposals.length}</span>`:''}${(d.checks||[]).length?`<span class="tag warn">확인 ${d.checks.length}</span>`:''}${(d.related||[]).length?`<span class="tag">관련 ${d.related.length}</span>`:''}</div>
     </div>`;
   }).join('');
 }
@@ -314,37 +323,43 @@ async function runAnalyze(){
       title: meta.title || (a.summary ? a.summary.slice(0,30) : '회의록'),
       date: meta.date || a.date || today(), place: meta.place || a.place || '',
       attendees: meta.attendees.length? meta.attendees : (a.attendees||[]), recorder: meta.recorder,
-      notices:a.notices||[], discussions:a.discussions||[],
-      followups:(a.followups||[]).map(t=>typeof t==='string'?{text:t,resolved:false,resolvedBy:''}:t),
-      decisions:a.decisions||[], etc:a.etc||[],
+      speakers:a.speakers||[], topics:a.topics||[], proposals:a.proposals||[], checks:a.checks||[],
       summary:a.summary||'', keywords:a.keywords||[], related:[], rawText:text,
       _candidates:a.relatedCandidates||[], _model:a.model
     };
+    normDoc(S.draft);
     go('review');
   }catch(e){ toast(e.message); } finally{ busy(false); }
 }
 
 /* ───────── AI 정리 확인·수정 (새 회의록 저장 전) ───────── */
+const rows=t=>Math.max(2,String(t||'').split('\n').length+1);
 function editListHtml(key, arr){
-  return `<div class="edit-list" id="el_${key}">${arr.map((v,i)=>`
-    <div class="item"><textarea data-k="${key}" data-i="${i}" rows="${Math.max(2,String(typeof v==='string'?v:v.text).split('\n').length+1)}">${esc(typeof v==='string'?v:v.text)}</textarea><button class="x" onclick="removeItem('${key}',${i})">×</button></div>`).join('')}
-    <button class="add" onclick="addItem('${key}')">＋ 항목 추가</button></div>`;
+  const x=i=>`<button class="x" onclick="removeItem('${key}',${i})">×</button>`;
+  let body='';
+  if(key==='speakers') body=arr.map((v,i)=>`<div class="pair"><input type="text" class="sp" value="${esc(v.speaker)}" placeholder="발화자"><textarea class="tx" rows="${rows(v.text)}">${esc(v.text)}</textarea>${x(i)}</div>`).join('');
+  else if(key==='topics') body=arr.map((v,i)=>`<div class="topic-edit"><div class="item"><input type="text" class="tt" value="${esc(v.title)}" placeholder="주제">${x(i)}</div><textarea class="ti" rows="${rows(v.items.join('\n'))}" placeholder="항목은 한 줄에 하나, 끝에 (발화자 N)">${esc(v.items.join('\n'))}</textarea></div>`).join('');
+  else if(key==='proposals') body=arr.map((v,i)=>`<div class="pair"><input type="text" class="pi" value="${esc(v.item)}" placeholder="항목"><textarea class="pa" rows="${rows(v.action)}" placeholder="실행 내용">${esc(v.action)}</textarea>${x(i)}</div>`).join('');
+  else body=arr.map((v,i)=>`<div class="item"><textarea rows="${rows(v)}">${esc(v)}</textarea>${x(i)}</div>`).join('');
+  return `<div class="edit-list" id="el_${key}">${body}<button class="add" onclick="addItem('${key}')">＋ 항목 추가</button></div>`;
 }
 function collectForm(d){
   d.title=$('#eTitle').value.trim(); d.date=$('#eDate').value; d.place=$('#ePlace').value.trim();
   d.attendees=$('#eAtt').value.split(/[,，、]/).map(s=>s.trim()).filter(Boolean); d.recorder=$('#eRec').value.trim();
   d.summary=$('#eSum').value.trim(); d.keywords=$('#eKw').value.split(/[,，、]/).map(s=>s.trim()).filter(Boolean);
-  SECTIONS.forEach(([k])=>{
-    const vals=[...document.querySelectorAll(`#el_${k} textarea`)].map(t=>t.value.trim()).filter(Boolean);
-    d[k] = k==='followups' ? vals.map((t,i)=>{ const old=(d.followups||[])[i]||{}; return {text:t,resolved:!!old.resolved,resolvedBy:old.resolvedBy||''}; }) : vals;
-  });
-  d.related=[...document.querySelectorAll('.cand:checked')].map(c=>c.value);
+  const q=(sel)=>[...document.querySelectorAll(sel)];
+  d.speakers=q('#el_speakers .pair').map(r=>({speaker:r.querySelector('.sp').value.trim(),text:r.querySelector('.tx').value.trim()})).filter(v=>v.speaker||v.text);
+  d.topics=q('#el_topics .topic-edit').map(r=>({title:r.querySelector('.tt').value.trim(),items:r.querySelector('.ti').value.split('\n').map(t=>t.replace(/^\s*[•\-·]\s*/,'').trim()).filter(Boolean)})).filter(v=>v.title||v.items.length);
+  d.proposals=q('#el_proposals .pair').map(r=>({item:r.querySelector('.pi').value.trim(),action:r.querySelector('.pa').value.trim()})).filter(v=>v.item||v.action);
+  d.checks=q('#el_checks textarea').map(t=>t.value.trim()).filter(Boolean);
+  d.related=q('.cand:checked').map(c=>c.value);
   return d;
 }
 function syncDraftFromForm(){ try{ collectForm(S.draft); }catch(e){} }
+const EMPTY={speakers:()=>({speaker:'',text:''}),topics:()=>({title:'',items:[]}),proposals:()=>({item:'',action:''}),checks:()=>''};
 function removeItem(k,i){ syncDraftFromForm(); S.draft[k].splice(i,1); rerenderSections(); }
-function addItem(k){ syncDraftFromForm(); S.draft[k].push(k==='followups'?{text:'',resolved:false,resolvedBy:''}:''); rerenderSections(); const ta=document.querySelectorAll(`#el_${k} textarea`); ta[ta.length-1]?.focus(); }
-function rerenderSections(){ SECTIONS.forEach(([k])=>{ $(`#el_${k}`).outerHTML=editListHtml(k,S.draft[k]||[]); }); }
+function addItem(k){ syncDraftFromForm(); S.draft[k].push(EMPTY[k]()); rerenderSections(); const el=document.querySelectorAll(`#el_${k} input, #el_${k} textarea`); el[el.length-1]?.focus(); }
+function rerenderSections(){ Object.keys(SEC).forEach(k=>{ $(`#el_${k}`).outerHTML=editListHtml(k,S.draft[k]||[]); }); }
 
 function formHtml(d, candidates, existingRelated){
   const cands = candidates||[];
@@ -365,7 +380,7 @@ function formHtml(d, candidates, existingRelated){
   </div>
   <div class="card">
     <h2>회의 내용</h2>
-    ${SECTIONS.map(([k,name])=>`<div class="sec-label" style="${secStyle(k)}">${name}</div>${editListHtml(k,d[k]||[])}`).join('')}
+    ${Object.entries(SEC).map(([k,name])=>`<div class="sec-label">${name}</div>${editListHtml(k,d[k]||[])}`).join('')}
   </div>
   <div class="card">
     <h2>관련 회의록</h2>
@@ -394,7 +409,7 @@ async function saveNew(){
   try{
     busy(true,'저장 중…');
     const images=S.images.map(i=>({name:i.name,mime:i.mime,data:i.data,type:i.type,extractedText:i.extractedText||''}));
-    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,notices:d.notices,discussions:d.discussions,followups:d.followups,decisions:d.decisions,etc:d.etc,summary:d.summary,keywords:d.keywords,related:d.related,rawText:d.rawText};
+    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,summary:d.summary,keywords:d.keywords,related:d.related,rawText:d.rawText};
     const r=await api('save',{doc:payload, images});
     S.images=[]; S.draft=null; toast('저장했습니다');
     go('detail', r.id);
@@ -406,24 +421,21 @@ async function renderDetail(id){
   $('#hTitle').textContent='회의록';
   $('#app').innerHTML='<div class="empty">불러오는 중…</div>';
   try{
-    const r=await api('get',{id}); const d=r.item; S.current=d;
+    const r=await api('get',{id}); const d=normDoc(r.item); S.current=d;
     const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
-    const openCount=(d.followups||[]).filter(f=>!f.resolved).length;
+    const sub=[fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).map(esc).join(' · ');
     $('#app').innerHTML = `
     <div class="card">
-      <h2 style="margin-bottom:4px">${esc(d.title)}</h2>
-      <div class="meta-line">${fmtDate(d.date)}${d.place?' · '+esc(d.place):''}</div>
-      <div class="meta-line">참석: ${esc((d.attendees||[]).join(', '))||'-'} · 기록: ${esc(d.recorder||'-')}</div>
-      ${d.summary?`<p style="margin:10px 0 0">${esc(d.summary)}</p>`:''}
+      <h2 class="doc-title">${esc(d.title)}</h2>
+      <div class="doc-sub">${sub}</div>
+      <p class="doc-intro">${esc(introText(d))}${d.summary?'<br>'+esc(d.summary):''}</p>
       <div>${(d.keywords||[]).map(k=>`<span class="tag">${esc(k)}</span>`).join('')}</div>
     </div>
-    ${SECTIONS.map(([k,name])=>{
-        const arr=d[k]||[]; if(!arr.length) return '';
-        return `<div class="sec" style="${secStyle(k)}"><div class="sec-h">${name}<span class="n">${arr.length}</span>${k==='followups'&&openCount?` <span class="tag warn">미결 ${openCount}</span>`:''}</div><ul class="items">${arr.map((v,i)=>{
-          if(k==='followups'){ const f=typeof v==='string'?{text:v}:v;
-            return `<li class="${f.resolved?'resolved':''}"><input type="checkbox" ${f.resolved?'checked':''} onchange="toggleResolve('${d.id}',${i},this.checked)" title="해결됨 표시"><span class="txt">${esc(f.text)}${f.resolvedBy?` <a class="link" onclick="go('detail','${f.resolvedBy}')">→ 결정된 회의록</a>`:''}</span></li>`; }
-          return `<li><span class="txt">${itemHtml(k,v)}</span></li>`; }).join('')}</ul></div>`;
-      }).join('') || '<div class="card"><p class="muted" style="margin:0">정리된 내용이 없습니다.</p></div>'}
+    ${d.speakers.length?`<div class="card"><h2 class="sec-t">${SEC.speakers}</h2><table class="tb"><thead><tr><th style="width:100px">발언자</th><th>발언 내용</th></tr></thead><tbody>${d.speakers.map(v=>`<tr><td class="k">${esc(v.speaker)}</td><td>${esc(v.text)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${d.topics.length?`<div class="card"><h2 class="sec-t">${SEC.topics}</h2>${d.topics.map((t,i)=>`<div class="topic">${circ(i)} ${esc(t.title)}</div><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`).join('')}</div>`:''}
+    ${d.proposals.length?`<div class="card"><h2 class="sec-t">${SEC.proposals}</h2><table class="tb"><thead><tr><th style="width:44px">No.</th><th style="width:30%">항목</th><th>실행 내용</th></tr></thead><tbody>${d.proposals.map((v,i)=>`<tr><td class="n">${i+1}</td><td class="k" style="white-space:pre-wrap">${esc(v.item)}</td><td>${esc(v.action)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${d.checks.length?`<div class="card"><h2 class="sec-t">${SEC.checks}</h2><p class="muted" style="margin:0 0 8px">아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.</p><ul class="bul">${d.checks.map(v=>`<li>${esc(v)}</li>`).join('')}</ul></div>`:''}
+    ${!d.speakers.length&&!d.topics.length&&!d.proposals.length?'<div class="card"><p class="muted" style="margin:0">정리된 내용이 없습니다. 수정에서 내용을 넣거나, 새 회의록으로 다시 정리하세요.</p></div>':''}
     ${(d.attachments||[]).length?`<div class="card"><h2>첨부 ${d.attachments.length}건</h2>
       <div class="thumbs">${d.attachments.map(a=>`<a class="thumb" href="${a.url}" target="_blank" rel="noopener"><img src="${a.thumb}" alt="${esc(a.name)}" loading="lazy"><span class="k">${a.type==='handout'?'유인물':'사진'}</span></a>`).join('')}</div>
       ${d.attachments.some(a=>a.extractedText)?`<h3>유인물 인식 텍스트</h3>${d.attachments.filter(a=>a.extractedText).map(a=>`<pre class="raw">${esc(a.extractedText)}</pre>`).join('')}`:''}
@@ -441,20 +453,14 @@ async function renderDetail(id){
     </div>`;
   }catch(e){ $('#app').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
 }
-async function toggleResolve(id,index,checked){
-  try{
-    let resolvedBy='';
-    if(checked){ resolvedBy = prompt('어느 회의록에서 결정됐나요? (회의록 ID, 모르면 비워두세요)','')||''; }
-    await api('resolve',{id,index,resolved:checked,resolvedBy});
-    const it=S.items.find(x=>x.id===id); if(it&&it.followups&&it.followups[index]){ it.followups[index].resolved=checked; }
-    go('detail',id);
-  }catch(e){ toast(e.message); }
-}
 function copyText(){
   const d=S.current; if(!d) return;
   const lines=[`# ${d.title}`,`일시: ${fmtDate(d.date)}${d.place?'  장소: '+d.place:''}`,`참석: ${(d.attendees||[]).join(', ')}  기록: ${d.recorder||''}`,''];
   if(d.summary) lines.push(d.summary,'');
-  SECTIONS.forEach(([k,name])=>{ const arr=d[k]||[]; if(!arr.length) return; lines.push(`## ${name}`); arr.forEach(v=>lines.push('- '+(typeof v==='string'?v:v.text+(v.resolved?' (해결)':'')).replace(/\n/g,'\n  '))); lines.push(''); });
+  if(d.speakers.length){ lines.push('## '+SEC.speakers); d.speakers.forEach(v=>lines.push(`- ${v.speaker}: ${v.text.replace(/\n/g,'\n  ')}`)); lines.push(''); }
+  if(d.topics.length){ lines.push('## '+SEC.topics); d.topics.forEach((t,i)=>{ lines.push(`### ${circ(i)} ${t.title}`); t.items.forEach(v=>lines.push('- '+v)); lines.push(''); }); }
+  if(d.proposals.length){ lines.push('## '+SEC.proposals); d.proposals.forEach((v,i)=>lines.push(`${i+1}. ${v.item} — ${v.action}`)); lines.push(''); }
+  if(d.checks.length){ lines.push('## '+SEC.checks); d.checks.forEach(v=>lines.push('- '+v)); lines.push(''); }
   navigator.clipboard.writeText(lines.join('\n')).then(()=>toast('복사했습니다'),()=>toast('복사 실패'));
 }
 async function delDoc(id){
@@ -497,31 +503,33 @@ function wRun(text,o={}){
 }
 function wPara(runs,o={}){
   const pr=(o.keepNext?'<w:keepNext/>':'')+(o.bullet?'<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>':'')
-    +(o.border?'<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="2" w:color="2D5D8F"/></w:pBdr>':'')
+    +(o.border?'<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="6" w:color="BBBBBB"/></w:pBdr>':o.topBorder?'<w:pBdr><w:top w:val="single" w:sz="6" w:space="6" w:color="BBBBBB"/></w:pBdr>':'')
     +(o.bar?`<w:pBdr><w:left w:val="single" w:sz="36" w:space="6" w:color="${o.bar[0]}"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="${o.bar[1]}"/>`:'')
     +`<w:spacing w:before="${o.before||0}" w:after="${o.after??80}"/>`+(o.jc?`<w:jc w:val="${o.jc}"/>`:'');
   return `<w:p><w:pPr>${pr}</w:pPr>${runs}</w:p>`;
 }
 function buildDocxBlob(d, relDocs){
-  const C={notices:['2D5D8F','E6EEF7'],discussions:['6B4FA0','EFEAF7'],followups:['A06B11','FBF1DD'],decisions:['2F7A4B','E4F2E8'],etc:['6B6A66','EFEEEA'],misc:['555555','EFEEEA']};
-  const sec=(name,arr,mk,k='misc')=>arr.length?wPara(wRun(`${name}  (${arr.length})`,{b:1,sz:24,color:C[k][0]}),{before:280,after:120,bar:C[k],keepNext:1})+arr.map(mk).join(''):'';
+  normDoc(d);
+  const BLUE='2F5A8B', TOPIC='3A74B0';
+  const H1=(t)=>wPara(wRun(t,{b:1,sz:28,color:BLUE}),{before:320,after:120,keepNext:1});
   const bl=t=>wPara(wRun(t),{bullet:1,after:60});
-  const dl=t=>{ t=String(t??''); const i=t.indexOf('\n'); return i<0?bl(t):wPara(wRun(t.slice(0,i),{b:1})+'<w:r><w:br/></w:r>'+wRun(t.slice(i+1)),{bullet:1,after:120}); };
-  const cell=(w,inner,shade)=>`<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${shade?'<w:shd w:val="clear" w:color="auto" w:fill="F0EEE8"/>':''}<w:vAlign w:val="center"/></w:tcPr>${inner}</w:tc>`;
-  const rows=[['일시',fmtDate(d.date)],['장소',d.place||'-'],['참석자',(d.attendees||[]).join(', ')||'-'],['기록자',d.recorder||'-']];
-  const table=`<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblBorders>${['top','left','bottom','right','insideH','insideV'].map(s=>`<w:${s} w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>`).join('')}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="110" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="110" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid><w:gridCol w:w="1500"/><w:gridCol w:w="8138"/></w:tblGrid>`
-    +rows.map(([k,v])=>`<w:tr>${cell(1500,wPara(wRun(k,{b:1}),{after:0,jc:'center'}),1)}${cell(8138,wPara(wRun(v),{after:0}))}</w:tr>`).join('')+`</w:tbl>`;
-  const fu=(d.followups||[]).map(f=>typeof f==='string'?{text:f}:f);
-  const att=d.attachments||[];
+  const bord=['top','left','bottom','right','insideH','insideV'].map(s=>`<w:${s} w:val="single" w:sz="4" w:space="0" w:color="000000"/>`).join('');
+  const cell=(w,inner,fill)=>`<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${fill?`<w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>`:''}</w:tcPr>${inner}</w:tc>`;
+  const table=(widths,head,rows)=>`<w:tbl><w:tblPr><w:tblW w:w="${widths.reduce((a,b)=>a+b,0)}" w:type="dxa"/><w:tblBorders>${bord}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="70" w:type="dxa"/><w:left w:w="110" w:type="dxa"/><w:bottom w:w="70" w:type="dxa"/><w:right w:w="110" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${widths.map(w=>`<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`
+    +`<w:tr><w:trPr><w:tblHeader/></w:trPr>${head.map((h,i)=>cell(widths[i],wPara(wRun(h,{b:1}),{after:0}),'DCE6F1')).join('')}</w:tr>`
+    +rows.map(r=>`<w:tr><w:trPr><w:cantSplit/></w:trPr>${r.map((c,i)=>cell(widths[i],c.x,c.fill)).join('')}</w:tr>`).join('')+`</w:tbl>`;
+  const sub=[fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).join(' · ');
   const body=
-    wPara(wRun(d.title||'회의록',{b:1,sz:36}),{jc:'center',after:200})+table+
-    (d.summary?wPara(wRun('요약  ',{b:1,color:'2D5D8F'})+wRun(d.summary),{before:200,after:60}):'')+
-    sec('공지',d.notices||[],bl,'notices')+sec('토의사항',d.discussions||[],dl,'discussions')+
-    sec('추후논의',fu,f=>wPara(wRun(f.resolved?'[해결] ':'[미결] ',{b:1,color:f.resolved?'2F7A4B':'A06B11'})+wRun(f.text),{bullet:1,after:60}),'followups')+
-    sec('결정',d.decisions||[],bl,'decisions')+sec('기타',d.etc||[],bl,'etc')+
-    sec('관련 회의록',relDocs||[],x=>bl(`${x.title} (${fmtDate(x.date)})`))+
-    sec('첨부 자료',att,a=>bl(`${a.name} (${a.type==='handout'?'유인물':'사진'})`))+
-    wPara(wRun(`높은뜻안성교회 회의록 · 출력일 ${fmtDate(today())}`,{sz:18,color:'888888'}),{before:360,jc:'right'});
+    wPara(wRun(d.title||'회의록',{b:1,sz:40,color:BLUE}),{jc:'center',before:200,after:80})+
+    wPara(wRun(sub,{sz:20,color:'666666'}),{jc:'center',after:200,border:1})+
+    wPara(wRun(introText(d)+(d.summary?'\n'+d.summary:''),{sz:20,color:'444444'}),{before:160,after:120})+
+    (d.speakers.length? H1('1. 개인별 발언 정리')+table([1500,8138],['발언자','발언 내용'],d.speakers.map(v=>[{x:wPara(wRun(v.speaker,{b:1}),{after:0}),fill:'F3F2EE'},{x:wPara(wRun(v.text),{after:0})}])):'')+
+    (d.topics.length? H1('2. 주제별 정리')+d.topics.map((t,i)=>wPara(wRun(`${circ(i)} ${t.title}`,{b:1,sz:24,color:TOPIC}),{before:200,after:80,keepNext:1})+t.items.map(bl).join('')).join(''):'')+
+    (d.proposals.length? H1('3. 종합 제안')+table([700,2800,6138],['No.','항목','실행 내용'],d.proposals.map((v,i)=>[{x:wPara(wRun(String(i+1),{b:1}),{after:0,jc:'center'})},{x:wPara(wRun(v.item,{b:1}),{after:0})},{x:wPara(wRun(v.action),{after:0})}])):'')+
+    (d.checks.length? H1('4. 확인이 필요한 사항')+wPara(wRun('아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.',{sz:20,color:'444444'}),{after:80})+d.checks.map(bl).join(''):'')+
+    ((relDocs||[]).length? H1('관련 회의록')+relDocs.map(x=>bl(`${x.title} (${fmtDate(x.date)})`)).join(''):'')+
+    ((d.attachments||[]).length? H1('첨부 자료')+d.attachments.map(a=>bl(`${a.name} (${a.type==='handout'?'유인물':'사진'})`)).join(''):'')+
+    wPara(wRun(`작성일: ${fmtDate(today())}`,{sz:18,color:'888888'}),{before:360,jc:'right',border:0,topBorder:1});
   const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
   const H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
   return makeZip([
@@ -563,7 +571,7 @@ async function exportDocx(){
 async function renderEdit(id){
   $('#hTitle').textContent='회의록 수정';
   const d = S.current && S.current.id===id ? S.current : (await api('get',{id})).item;
-  S.draft = JSON.parse(JSON.stringify(d)); S.images=[];
+  S.draft = normDoc(JSON.parse(JSON.stringify(d))); S.images=[];
   const existing=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)||{id:rid,title:rid,date:''});
   const others=S.items.filter(x=>x.id!==id && !(d.related||[]).includes(x.id)).slice(0,30);
   $('#app').innerHTML = `
@@ -591,22 +599,12 @@ async function saveEdit(id){
   try{
     busy(true,'저장 중…');
     const images=S.images.map(i=>({name:i.name,mime:i.mime,data:i.data,type:i.type}));
-    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,notices:d.notices,discussions:d.discussions,followups:d.followups,decisions:d.decisions,etc:d.etc,summary:d.summary,keywords:d.keywords,related:d.related};
+    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,summary:d.summary,keywords:d.keywords,related:d.related};
     await api('update',{id, doc:payload, images});
     S.images=[]; toast('수정했습니다');
     const r=await api('list',{limit:300}); S.items=r.items||[];
     go('detail',id);
   }catch(e){ toast(e.message); } finally{ busy(false); }
-}
-
-/* ───────── 미결 추후논의 ───────── */
-function renderFollowups(){
-  $('#hTitle').textContent='미결 추후논의';
-  const rows=[];
-  S.items.forEach(d=>(d.followups||[]).forEach((f,i)=>{ if(!f.resolved) rows.push({d,f,i}); }));
-  $('#app').innerHTML = rows.length ? `<div class="card"><ul class="items">${rows.map(({d,f,i})=>`
-    <li><input type="checkbox" onchange="toggleResolve('${d.id}',${i},this.checked)"><span class="txt">${esc(f.text)}<div class="meta-line"><a class="link" onclick="go('detail','${d.id}')">${esc(d.title)} · ${fmtDate(d.date)}</a></div></span></li>`).join('')}</ul></div>`
-    : '<div class="empty">미결 추후논의가 없습니다.</div>';
 }
 
 /* ───────── 시작 ───────── */
