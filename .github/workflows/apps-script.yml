@@ -38,6 +38,9 @@ jobs:
           if [ -z "$CLASPRC" ] || [ -z "$SCRIPT_ID" ]; then
             echo "::notice::CLASPRC_JSON 또는 SCRIPT_ID가 없어 Apps Script 배포를 건너뜁니다."
             echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$SCRIPT_ID" == AKfycb* ]]; then
+            echo "::error::SCRIPT_ID에 배포 ID(AKfycb…)가 들어 있습니다. Apps Script ▸ 프로젝트 설정(톱니바퀴) ▸ ID ▸ 「스크립트 ID」 값으로 바꾸세요."
+            exit 1
           fi
 
       - uses: actions/setup-node@v4
