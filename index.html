@@ -37,6 +37,13 @@
   .tag{display:inline-block;background:var(--accent-soft);color:var(--accent);font-size:12px;padding:2px 8px;border-radius:999px;margin:2px 4px 0 0}
   .tag.warn{background:#fbf1dd;color:var(--warn)}
   .tag.ok{background:#e4f2e8;color:var(--ok)}
+  .sec,.sec-h,.sec-label{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .sec{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--c);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
+  .sec-h{display:flex;align-items:center;gap:8px;background:var(--cs);color:var(--c);font-weight:700;font-size:16px;padding:10px 14px}
+  .sec-h .n{font-size:12px;font-weight:700;background:#fff;color:var(--c);border-radius:999px;padding:1px 9px}
+  .sec .items{padding:2px 14px 4px}
+  .sec .items li .txt .head{display:block;font-weight:700}
+  .sec-label{display:inline-block;color:var(--c);background:var(--cs);border-left:4px solid var(--c);padding:4px 10px;border-radius:6px;font-size:14px;font-weight:700;margin:18px 0 8px}
   .items{list-style:none;padding:0;margin:0}
   .items li{padding:8px 0;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:flex-start}
   .items li:last-child{border-bottom:0}
@@ -106,6 +113,19 @@ const S = {
 const SECTIONS = [
   ['notices','공지'],['discussions','토의사항'],['followups','추후논의'],['decisions','결정'],['etc','기타']
 ];
+// 섹션 색: [진한색, 옅은 배경]
+const SEC_COLOR = {
+  notices:['#2d5d8f','#e6eef7'], discussions:['#6b4fa0','#efeaf7'], followups:['#a06b11','#fbf1dd'],
+  decisions:['#2f7a4b','#e4f2e8'], etc:['#6b6a66','#efeeea']
+};
+const secStyle = k => `--c:${SEC_COLOR[k][0]};--cs:${SEC_COLOR[k][1]}`;
+// 토의사항은 첫 줄(안건명)을 굵게
+function itemHtml(k, text){
+  const t=String(text??'');
+  if(k!=='discussions' || !t.includes('\n')) return esc(t);
+  const i=t.indexOf('\n');
+  return `<span class="head">${esc(t.slice(0,i))}</span>${esc(t.slice(i+1))}`;
+}
 
 /* ───────── 유틸 ───────── */
 const $ = s => document.querySelector(s);
@@ -345,7 +365,7 @@ function formHtml(d, candidates, existingRelated){
   </div>
   <div class="card">
     <h2>회의 내용</h2>
-    ${SECTIONS.map(([k,name])=>`<h3>${name}</h3>${editListHtml(k,d[k]||[])}`).join('')}
+    ${SECTIONS.map(([k,name])=>`<div class="sec-label" style="${secStyle(k)}">${name}</div>${editListHtml(k,d[k]||[])}`).join('')}
   </div>
   <div class="card">
     <h2>관련 회의록</h2>
@@ -397,15 +417,13 @@ async function renderDetail(id){
       ${d.summary?`<p style="margin:10px 0 0">${esc(d.summary)}</p>`:''}
       <div>${(d.keywords||[]).map(k=>`<span class="tag">${esc(k)}</span>`).join('')}</div>
     </div>
-    <div class="card">
-      ${SECTIONS.map(([k,name])=>{
+    ${SECTIONS.map(([k,name])=>{
         const arr=d[k]||[]; if(!arr.length) return '';
-        return `<h3>${name}${k==='followups'&&openCount?` <span class="tag warn">미결 ${openCount}</span>`:''}</h3><ul class="items">${arr.map((v,i)=>{
+        return `<div class="sec" style="${secStyle(k)}"><div class="sec-h">${name}<span class="n">${arr.length}</span>${k==='followups'&&openCount?` <span class="tag warn">미결 ${openCount}</span>`:''}</div><ul class="items">${arr.map((v,i)=>{
           if(k==='followups'){ const f=typeof v==='string'?{text:v}:v;
             return `<li class="${f.resolved?'resolved':''}"><input type="checkbox" ${f.resolved?'checked':''} onchange="toggleResolve('${d.id}',${i},this.checked)" title="해결됨 표시"><span class="txt">${esc(f.text)}${f.resolvedBy?` <a class="link" onclick="go('detail','${f.resolvedBy}')">→ 결정된 회의록</a>`:''}</span></li>`; }
-          return `<li><span class="txt">${esc(v)}</span></li>`; }).join('')}</ul>`;
-      }).join('') || '<p class="muted">정리된 내용이 없습니다.</p>'}
-    </div>
+          return `<li><span class="txt">${itemHtml(k,v)}</span></li>`; }).join('')}</ul></div>`;
+      }).join('') || '<div class="card"><p class="muted" style="margin:0">정리된 내용이 없습니다.</p></div>'}
     ${(d.attachments||[]).length?`<div class="card"><h2>첨부 ${d.attachments.length}건</h2>
       <div class="thumbs">${d.attachments.map(a=>`<a class="thumb" href="${a.url}" target="_blank" rel="noopener"><img src="${a.thumb}" alt="${esc(a.name)}" loading="lazy"><span class="k">${a.type==='handout'?'유인물':'사진'}</span></a>`).join('')}</div>
       ${d.attachments.some(a=>a.extractedText)?`<h3>유인물 인식 텍스트</h3>${d.attachments.filter(a=>a.extractedText).map(a=>`<pre class="raw">${esc(a.extractedText)}</pre>`).join('')}`:''}
@@ -480,12 +498,15 @@ function wRun(text,o={}){
 function wPara(runs,o={}){
   const pr=(o.keepNext?'<w:keepNext/>':'')+(o.bullet?'<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>':'')
     +(o.border?'<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="2" w:color="2D5D8F"/></w:pBdr>':'')
+    +(o.bar?`<w:pBdr><w:left w:val="single" w:sz="36" w:space="6" w:color="${o.bar[0]}"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="${o.bar[1]}"/>`:'')
     +`<w:spacing w:before="${o.before||0}" w:after="${o.after??80}"/>`+(o.jc?`<w:jc w:val="${o.jc}"/>`:'');
   return `<w:p><w:pPr>${pr}</w:pPr>${runs}</w:p>`;
 }
 function buildDocxBlob(d, relDocs){
-  const sec=(name,arr,mk)=>arr.length?wPara(wRun(name,{b:1,sz:24,color:'2D5D8F'}),{before:240,after:100,border:1,keepNext:1})+arr.map(mk).join(''):'';
+  const C={notices:['2D5D8F','E6EEF7'],discussions:['6B4FA0','EFEAF7'],followups:['A06B11','FBF1DD'],decisions:['2F7A4B','E4F2E8'],etc:['6B6A66','EFEEEA'],misc:['555555','EFEEEA']};
+  const sec=(name,arr,mk,k='misc')=>arr.length?wPara(wRun(`${name}  (${arr.length})`,{b:1,sz:24,color:C[k][0]}),{before:280,after:120,bar:C[k],keepNext:1})+arr.map(mk).join(''):'';
   const bl=t=>wPara(wRun(t),{bullet:1,after:60});
+  const dl=t=>{ t=String(t??''); const i=t.indexOf('\n'); return i<0?bl(t):wPara(wRun(t.slice(0,i),{b:1})+'<w:r><w:br/></w:r>'+wRun(t.slice(i+1)),{bullet:1,after:120}); };
   const cell=(w,inner,shade)=>`<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${shade?'<w:shd w:val="clear" w:color="auto" w:fill="F0EEE8"/>':''}<w:vAlign w:val="center"/></w:tcPr>${inner}</w:tc>`;
   const rows=[['일시',fmtDate(d.date)],['장소',d.place||'-'],['참석자',(d.attendees||[]).join(', ')||'-'],['기록자',d.recorder||'-']];
   const table=`<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblBorders>${['top','left','bottom','right','insideH','insideV'].map(s=>`<w:${s} w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>`).join('')}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="110" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="110" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid><w:gridCol w:w="1500"/><w:gridCol w:w="8138"/></w:tblGrid>`
@@ -495,9 +516,9 @@ function buildDocxBlob(d, relDocs){
   const body=
     wPara(wRun(d.title||'회의록',{b:1,sz:36}),{jc:'center',after:200})+table+
     (d.summary?wPara(wRun('요약  ',{b:1,color:'2D5D8F'})+wRun(d.summary),{before:200,after:60}):'')+
-    sec('공지',d.notices||[],bl)+sec('토의사항',d.discussions||[],bl)+
-    sec('추후논의',fu,f=>wPara(wRun(f.resolved?'[해결] ':'[미결] ',{b:1,color:f.resolved?'2F7A4B':'A06B11'})+wRun(f.text),{bullet:1,after:60}))+
-    sec('결정',d.decisions||[],bl)+sec('기타',d.etc||[],bl)+
+    sec('공지',d.notices||[],bl,'notices')+sec('토의사항',d.discussions||[],dl,'discussions')+
+    sec('추후논의',fu,f=>wPara(wRun(f.resolved?'[해결] ':'[미결] ',{b:1,color:f.resolved?'2F7A4B':'A06B11'})+wRun(f.text),{bullet:1,after:60}),'followups')+
+    sec('결정',d.decisions||[],bl,'decisions')+sec('기타',d.etc||[],bl,'etc')+
     sec('관련 회의록',relDocs||[],x=>bl(`${x.title} (${fmtDate(x.date)})`))+
     sec('첨부 자료',att,a=>bl(`${a.name} (${a.type==='handout'?'유인물':'사진'})`))+
     wPara(wRun(`높은뜻안성교회 회의록 · 출력일 ${fmtDate(today())}`,{sz:18,color:'888888'}),{before:360,jc:'right'});
