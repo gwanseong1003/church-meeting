@@ -82,6 +82,14 @@
   .modal label.chk{display:flex;align-items:center;gap:10px;font-size:15px;color:var(--ink);margin:0;padding:9px 2px;border-bottom:1px solid var(--line);cursor:pointer}
   .modal label.chk input{width:18px;height:18px}
   .tb td ul.bul{padding-left:16px}
+  /* v2.4: Word에 넣을 항목 체크 (화면에서만, 인쇄 땐 숨김) */
+  input.xs,input.xsec{width:17px;height:17px;margin:0 8px 0 0;vertical-align:-3px;accent-color:var(--accent);cursor:pointer;flex:none}
+  .xi.off{opacity:.38}
+  .xbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;color:var(--muted);background:var(--accent-soft);border-radius:8px;padding:8px 10px;margin-bottom:12px}
+  .xbar button{background:none;border:0;color:var(--accent);font:inherit;cursor:pointer;padding:0 4px}
+  ul.ckl{list-style:none;padding-left:0}
+  ul.ckl>li{display:flex;align-items:flex-start}
+  .tb td.k label{display:flex;align-items:flex-start}
   .tb td ul.bul li{margin:2px 0}
   .spinner{width:36px;height:36px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -582,20 +590,27 @@ async function renderDetail(id){
     const r=await api('get',{id}); const d=normDoc(r.item); S.current=d;
     const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
     const sub=[fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).map(esc).join(' · ');
+    // v2.4: 항목 앞 체크 → 체크한 것만 Word로. 칸 전체 체크는 이 기기에 기억(mm_docx_off)
+    let off=new Set(); try{ off=new Set(JSON.parse(localStorage.getItem('mm_docx_off')||'[]')); }catch(e){}
+    const on=k=>off.has(k)?'':'checked';
+    const sk=k=>`<input type="checkbox" class="xsec" data-k="${k}" ${on(k)} onchange="xsSec(this)" title="이 칸 전체를 Word에 넣기">`;
+    const ik=(k,i)=>`<input type="checkbox" class="xs" data-k="${k}" data-i="${i}" ${on(k)} onchange="xsItem(this)" title="Word에 넣기">`;
+    const offc=k=>off.has(k)?' off':'';
     $('#app').innerHTML = `
+    <div class="xbar">☑ 체크한 항목만 Word로 저장됩니다. <button onclick="xsAll(true)">모두 체크</button><button onclick="xsAll(false)">모두 해제</button></div>
     <div class="card">
       <h2 class="doc-title">${esc(d.title)}</h2>
       <div class="doc-sub">${sub}</div>
-      <p class="doc-intro">${esc(introText(d))}${d.summary?'<br>'+esc(d.summary):''}</p>
+      <p class="doc-intro xi${offc('intro')}" data-k="intro"><label style="display:flex;align-items:flex-start;cursor:pointer">${sk('intro')}<span>${esc(introText(d))}${d.summary?'<br>'+esc(d.summary):''}</span></label></p>
       <div>${(d.keywords||[]).map(k=>`<span class="tag">${esc(k)}</span>`).join('')}</div>
     </div>
-    ${d.speakers.length?`<div class="card"><h2 class="sec-t">${SEC.speakers}</h2><table class="tb"><thead><tr><th style="width:100px">발언자</th><th>발언 내용</th></tr></thead><tbody>${d.speakers.map(v=>`<tr><td class="k">${esc(v.speaker)}</td><td>${spCell(v.text)}</td></tr>`).join('')}</tbody></table></div>`:''}
-    ${d.topics.length?`<div class="card"><h2 class="sec-t">${SEC.topics}</h2>${d.topics.map((t,i)=>`<div class="topic">${circ(i)} ${esc(t.title)}</div><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`).join('')}</div>`:''}
-    ${d.proposals.length?`<div class="card"><h2 class="sec-t">${SEC.proposals}</h2><table class="tb"><thead><tr><th style="width:44px">No.</th><th style="width:30%">항목</th><th>실행 내용</th></tr></thead><tbody>${d.proposals.map((v,i)=>`<tr><td class="n">${i+1}</td><td class="k" style="white-space:pre-wrap">${esc(v.item)}</td><td>${esc(v.action)}</td></tr>`).join('')}</tbody></table></div>`:''}
-    ${d.checks.length?`<div class="card"><h2 class="sec-t">${SEC.checks}</h2><p class="muted" style="margin:0 0 8px">아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.</p><ul class="bul">${d.checks.map(v=>`<li>${esc(v)}</li>`).join('')}</ul></div>`:''}
-    ${d.materials.length?`<div class="card"><h2 class="sec-t">${SEC.materials}</h2>${d.materials.map((t,i)=>`<div class="topic">${circ(i)} ${esc(t.title)}${t.source?` <span class="meta-line">(${esc(t.source)})</span>`:''}</div><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`).join('')}</div>`:''}
+    ${d.speakers.length?`<div class="card"><h2 class="sec-t">${sk('speakers')}${SEC.speakers}</h2><table class="tb"><thead><tr><th style="width:120px">발언자</th><th>발언 내용</th></tr></thead><tbody>${d.speakers.map((v,i)=>`<tr class="xi${offc('speakers')}" data-k="speakers" data-i="${i}"><td class="k"><label>${ik('speakers',i)}${esc(v.speaker)}</label></td><td>${spCell(v.text)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${d.topics.length?`<div class="card"><h2 class="sec-t">${sk('topics')}${SEC.topics}</h2>${d.topics.map((t,i)=>`<div class="xi${offc('topics')}" data-k="topics" data-i="${i}"><label class="topic" style="display:block;cursor:pointer">${ik('topics',i)}${circ(i)} ${esc(t.title)}</label><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul></div>`).join('')}</div>`:''}
+    ${d.proposals.length?`<div class="card"><h2 class="sec-t">${sk('proposals')}${SEC.proposals}</h2><table class="tb"><thead><tr><th style="width:64px">No.</th><th style="width:30%">항목</th><th>실행 내용</th></tr></thead><tbody>${d.proposals.map((v,i)=>`<tr class="xi${offc('proposals')}" data-k="proposals" data-i="${i}"><td class="n" style="width:64px;white-space:nowrap"><label>${ik('proposals',i)}${i+1}</label></td><td class="k" style="white-space:pre-wrap">${esc(v.item)}</td><td>${esc(v.action)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${d.checks.length?`<div class="card"><h2 class="sec-t">${sk('checks')}${SEC.checks}</h2><p class="muted" style="margin:0 0 8px">아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.</p><ul class="bul ckl">${d.checks.map((v,i)=>`<li class="xi${offc('checks')}" data-k="checks" data-i="${i}"><label style="display:flex;cursor:pointer">${ik('checks',i)}<span>${esc(v)}</span></label></li>`).join('')}</ul></div>`:''}
+    ${d.materials.length?`<div class="card"><h2 class="sec-t">${sk('materials')}${SEC.materials}</h2>${d.materials.map((t,i)=>`<div class="xi${offc('materials')}" data-k="materials" data-i="${i}"><label class="topic" style="display:block;cursor:pointer">${ik('materials',i)}${circ(i)} ${esc(t.title)}${t.source?` <span class="meta-line">(${esc(t.source)})</span>`:''}</label><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul></div>`).join('')}</div>`:''}
     ${!d.speakers.length&&!d.topics.length&&!d.proposals.length&&!d.materials.length?'<div class="card"><p class="muted" style="margin:0">정리된 내용이 없습니다. 수정에서 내용을 넣거나, 새 회의록으로 다시 정리하세요.</p></div>':''}
-    ${(d.attachments||[]).length?`<div class="card"><h2>첨부 ${d.attachments.length}건</h2>
+    ${(d.attachments||[]).length?`<div class="card xi${offc('attach')}" data-k="attach"><h2>${sk('attach')}첨부 ${d.attachments.length}건</h2>
       <div class="thumbs">${d.attachments.map(a=>{
         const img=!a.kind||a.kind==='image';
         const inner=img?`<img src="${a.thumb}" alt="${esc(a.name)}" loading="lazy">`:fileBox(a.name,KIND_LABEL(a)+(a.url?'':' (원본 없음)'));
@@ -604,12 +619,12 @@ async function renderDetail(id){
       }).join('')}</div>
       ${extractedHtml(d.attachments)}
     </div>`:''}
-    <div class="card"><h2>관련 회의록</h2>
+    <div class="card${relDocs.length?' xi'+offc('related'):''}" data-k="related"><h2>${relDocs.length?sk('related'):''}관련 회의록</h2>
       ${relDocs.length? relDocs.map(x=>`<div class="list-item" onclick="go('detail','${x.id}')"><div class="t">${esc(x.title)}</div><div class="m">${fmtDate(x.date)}</div>${x.summary?`<div class="s">${esc(x.summary)}</div>`:''}</div>`).join('') : '<p class="muted" style="margin:0">연결된 회의록이 없습니다.</p>'}
     </div>
     ${d.rawText?`<div class="card"><details><summary class="muted" style="cursor:pointer">원본 채록문 보기</summary><pre class="raw" style="margin-top:8px;max-height:none">${esc(d.rawText)}</pre></details></div>`:''}
     <div class="actions">
-      <button class="btn primary" onclick="exportDialog()">Word 저장 (.docx)</button>
+      <button class="btn primary" onclick="exportDocxChecked()">체크한 항목 Word 저장</button>
       <button class="btn" onclick="window.print()">인쇄 / PDF</button>
       <button class="btn" onclick="copyText()">텍스트 복사</button>
       <button class="btn" onclick="go('edit','${d.id}')">수정</button>
@@ -717,34 +732,40 @@ function buildDocxBlob(d, relDocs, o={}){
   ]);
 }
 /* EXPORT-END */
-/* Word 저장 전에 넣을 칸 고르기 (v2.2). 고른 칸은 이 기기에 기억 */
-function docxOptList(d){
-  const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
-  return [['intro','소개 문장·한 줄 요약',true],
-    ...Object.keys(SEC).map(k=>[k,secName(k),(d[k]||[]).length>0]),
-    ['related','관련 회의록',relDocs.length>0],['attach','첨부 자료 목록',(d.attachments||[]).length>0]].filter(x=>x[2]);
+/* v2.4: 상세 화면 항목 앞 체크 → 체크한 것만 Word로 (v2.2의 칸 선택 창을 대신함)
+   - 칸 제목 체크 = 그 칸 전체 켜기/끄기. 칸 전체를 끈 것은 이 기기에 기억(다음 회의록에도)
+   - 개별 항목 체크는 기억하지 않음(회의록마다 다름). 화면을 다시 열면 칸 설정대로 돌아감 */
+function xsMark(el,on){ const c=el.closest('.xi'); if(c) c.classList.toggle('off',!on); }
+function xsSync(k){
+  const sec=document.querySelector(`.xsec[data-k="${k}"]`); if(!sec) return;
+  const items=[...document.querySelectorAll(`.xs[data-k="${k}"]`)]; if(!items.length){ xsMark(sec,sec.checked); return; }
+  const n=items.filter(x=>x.checked).length;
+  sec.checked=n>0; sec.indeterminate=n>0&&n<items.length;
 }
-function exportDialog(){
+function xsSec(el){
+  const k=el.dataset.k, items=[...document.querySelectorAll(`.xs[data-k="${k}"]`)];
+  items.forEach(x=>{ x.checked=el.checked; xsMark(x,el.checked); });
+  if(!items.length) xsMark(el,el.checked);
+  el.indeterminate=false;
+}
+function xsItem(el){ xsMark(el,el.checked); xsSync(el.dataset.k); }
+function xsAll(on){ document.querySelectorAll('.xsec').forEach(x=>{ x.checked=on; xsSec(x); }); }
+function exportDocxChecked(){
   const d=S.current; if(!d) return;
-  let saved=null; try{ saved=JSON.parse(localStorage.getItem('mm_docx_off')||'null'); }catch(e){}
-  const off=new Set(saved||[]);
-  const m=document.createElement('div'); m.className='modal'; m.id='docxModal';
-  m.onclick=e=>{ if(e.target===m) m.remove(); };
-  m.innerHTML=`<div class="card"><h2>Word에 넣을 항목</h2>
-    ${docxOptList(d).map(([k,n])=>`<label class="chk"><input type="checkbox" value="${k}" ${off.has(k)?'':'checked'}>${esc(n)}</label>`).join('')}
-    <p class="muted" style="margin:10px 0 0">뺀 항목이 있으면 번호를 1부터 다시 매깁니다. 고른 항목은 다음에도 기억합니다.</p>
-    <div class="actions"><button class="btn" onclick="$('#docxModal').remove()">취소</button><button class="btn primary" style="flex:1" onclick="exportDocxChosen()">저장</button></div></div>`;
-  document.body.appendChild(m);
-}
-function exportDocxChosen(){
-  const boxes=[...document.querySelectorAll('#docxModal input[type=checkbox]')];
-  const on=new Set(boxes.filter(b=>b.checked).map(b=>b.value)), offList=boxes.filter(b=>!b.checked).map(b=>b.value);
+  const secOn=k=>{ const x=document.querySelector(`.xsec[data-k="${k}"]`); return !!x&&x.checked; };
+  const pick=k=>(d[k]||[]).filter((_,i)=>{ const x=document.querySelector(`.xs[data-k="${k}"][data-i="${i}"]`); return x&&x.checked; });
+  const keys=Object.keys(SEC).filter(k=>secOn(k));
+  const d2=Object.assign({},d); Object.keys(SEC).forEach(k=>{ d2[k]=keys.includes(k)?pick(k):[]; });
+  const used=keys.filter(k=>d2[k].length);
+  const o={keys:used, intro:secOn('intro'), related:secOn('related'), attach:secOn('attach')};
+  if(!used.length && !o.intro){ toast('체크한 항목이 없습니다'); return; }
+  // 칸 전체를 끈 것만 기억(일부만 고른 칸은 켜진 것으로 봄)
+  const offList=[...document.querySelectorAll('.xsec')].filter(x=>!x.checked).map(x=>x.dataset.k);
   try{ localStorage.setItem('mm_docx_off',JSON.stringify(offList)); }catch(e){}
-  $('#docxModal').remove();
-  exportDocx({keys:Object.keys(SEC).filter(k=>on.has(k)), intro:on.has('intro'), related:on.has('related'), attach:on.has('attach')});
+  exportDocx(o, d2);
 }
-async function exportDocx(o={}){
-  const d=S.current; if(!d) return;
+async function exportDocx(o={}, dOverride){
+  const d=dOverride||S.current; if(!d) return;
   try{
     const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
     const blob=buildDocxBlob(d, relDocs, o);
