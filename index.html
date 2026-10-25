@@ -163,7 +163,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v3.2';
+const APP_VERSION = 'v3.3';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -312,8 +312,7 @@ function drawList(){
   if(!rows.length){ $('#listBox').innerHTML=`<div class="empty">${!S.items.length?'아직 회의록이 없습니다. 새 회의록을 만들어보세요.':q?'검색 결과가 없습니다':'이 부서의 회의록이 없습니다'}</div>`; return; }
   $('#listBox').innerHTML = rows.map(d=>{
     if(d.isPrivate) return `<div class="list-item locked" onclick="go('detail','${d.id}')">
-      <div class="t">🔒 비공개 회의록</div>
-      <div class="m">${d.dept?`<span class="tag dept">${esc(d.dept)}</span> `:''}${fmtDate(d.date)}</div>
+      <div class="t">🔒 ${esc([d.dept||'부서 미지정', fmtDate(d.date)].join(' · '))}</div>
     </div>`;
     return `<div class="list-item" onclick="go('detail','${d.id}')">
       <div class="t">${esc(d.title)}</div>
