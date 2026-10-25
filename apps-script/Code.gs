@@ -373,8 +373,10 @@ function analyze_(body) {
 
   let parsed = null, lastErr = null;
   for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
-    const raw = callClaude_(userParts, attempt === 1);
-    try { parsed = parseJson_(raw); } catch (e) { lastErr = e; }
+    const r = callClaude_(userParts, attempt === 1);
+    // 길이 한도에 걸려 잘린 응답은 다시 불러도 또 잘리므로 재시도하지 않는다
+    if (r.stop === 'max_tokens') throw new Error('회의 내용이 길어 AI 응답이 중간에 잘렸습니다(출력 한도 ' + MAX_OUT + '토큰). 채록문을 나눠 정리해 주세요.');
+    try { parsed = parseJson_(r.text); } catch (e) { lastErr = e; }
   }
   if (!parsed) throw new Error('AI 응답을 해석하지 못했습니다: ' + (lastErr && lastErr.message));
 
@@ -402,10 +404,13 @@ function recentForMatch_() {
   }
 }
 
+// 토의사항을 자세히 쓰게 한 뒤(v1.2) 긴 회의(채록문 4만 자대)는 8000토큰에서 잘렸다 → 넉넉히
+const MAX_OUT = 20000;
+
 function callClaude_(userParts, strict) {
   const payload = {
     model: CFG.claudeModel,
-    max_tokens: 8000,
+    max_tokens: MAX_OUT,
     system: SYSTEM_PROMPT + (strict ? '\n\n중요: 반드시 유효한 JSON 객체 하나만 출력하라. 다른 문자는 절대 넣지 마라.' : ''),
     messages: [{ role: 'user', content: userParts }],
   };
@@ -419,7 +424,7 @@ function callClaude_(userParts, strict) {
   const code = res.getResponseCode();
   const data = JSON.parse(res.getContentText() || '{}');
   if (code >= 300) throw new Error('Claude ' + code + ': ' + (data.error && data.error.message || res.getContentText().slice(0, 300)));
-  return (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n');
+  return { text: (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n'), stop: data.stop_reason };
 }
 
 function parseJson_(raw) {
