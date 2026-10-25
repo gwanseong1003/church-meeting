@@ -163,7 +163,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v3.1';
+const APP_VERSION = 'v3.2';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -177,7 +177,7 @@ const S = {
   pass: {},          // v3.1: 이번에 연 비공개 회의록 비밀번호(id→비밀번호). 메모리에만, 새로고침하면 다시 물음
 };
 // v3.1: 부서 (서버 Code.gs DEPTS와 같게)
-const DEPTS=['공동의회','당회','제직회','목회협의회','이끄미','비타키즈','베리키즈','비아틴즈','비컨청년부','교역자'];
+const DEPTS=['공동의회','당회','제직회','목회협의회','이끄미','비타키즈','베리키즈','비아틴즈','비컨청년부','교역자','재정부'];
 const deptOpts=sel=>`<option value="">부서 선택</option>`+DEPTS.map(x=>`<option ${x===sel?'selected':''}>${x}</option>`).join('');
 // 부서 + 비밀번호 칸(새 회의록·확인·수정 화면 공용). 비밀번호를 넣으면 비공개, 비우면 공개
 function deptRowHtml(pre,dept,pass){
