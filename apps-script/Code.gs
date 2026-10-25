@@ -46,6 +46,7 @@ function doPost(e) {
       case 'get':     return json_({ ok: true, item: getDoc_(body.id) });
       case 'analyze': return json_({ ok: true, result: analyze_(body) });
       case 'bulletize': return json_({ ok: true, speakers: bulletize_(body) });
+      case 'reanalyze': return json_({ ok: true, item: reanalyze_(body) });
       case 'save':    return json_({ ok: true, id: saveDoc_(body) });
       case 'update':  return json_({ ok: true, id: updateDoc_(body) });
       case 'delete':  deleteDoc_(body.id); return json_({ ok: true });
@@ -156,6 +157,7 @@ function listDocs_(limit) {
   return rows.filter(r => r.document).map(r => {
     const o = docToObj_(r.document);
     delete o.rawText; // 목록에서는 원문을 내려보내지 않음
+    delete o.prevVersion;
     return o;
   });
 }
@@ -366,17 +368,18 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 function analyze_(body) {
-  if (!CFG.claudeKey) throw new Error('서버에 CLAUDE_API_KEY가 설정되지 않았습니다');
   const text = String(body.text || '').trim();
   if (!text && !(body.images || []).length) throw new Error('채록문이 비어 있습니다');
-
-  const meta = body.meta || {};
-  const recent = recentForMatch_();
-
-  // v2.1: 자료 종류별로 Claude에 넘긴다 — 사진은 image, PDF는 document(그림·표까지 읽음),
-  //       PPTX·DOCX·HWPX는 브라우저에서 뽑은 텍스트(extractedText). 번호는 1부터, 프런트와 같은 순서.
-  const userParts = [];
   const handouts = (body.images || []).filter(img => img.type === 'handout');
+  return analyzeCore_(text, body.meta || {}, handouts, recentForMatch_());
+}
+
+// v2.1: 자료 종류별로 Claude에 넘긴다 — 사진은 image, PDF는 document(그림·표까지 읽음),
+//       PPTX·DOCX·HWPX는 브라우저에서 뽑은 텍스트(extractedText). 번호는 1부터, handouts 순서.
+// v2.6: 새 회의록(analyze_)과 저장된 회의록 다시 정리(reanalyze_)가 함께 쓴다
+function analyzeCore_(text, meta, handouts, recent) {
+  if (!CFG.claudeKey) throw new Error('서버에 CLAUDE_API_KEY가 설정되지 않았습니다');
+  const userParts = [];
   handouts.forEach((img, i) => {
     const label = '[자료 ' + (i + 1) + '] ' + (img.name || '');
     if (img.kind === 'pdf' && img.data) {
@@ -387,6 +390,8 @@ function analyze_(body) {
     } else if (img.data) {
       userParts.push({ type: 'text', text: label + ' (유인물 사진)' });
       userParts.push({ type: 'image', source: { type: 'base64', media_type: img.mime || 'image/jpeg', data: img.data } });
+    } else if (img.extractedText) {
+      userParts.push({ type: 'text', text: label + ' (유인물 사진에서 읽은 글자)\n' + String(img.extractedText).slice(0, MAX_EXTRACT) });
     }
   });
 
@@ -395,7 +400,7 @@ function analyze_(body) {
     JSON.stringify({ title: meta.title || '', date: meta.date || '', place: meta.place || '', attendees: meta.attendees || [], recorder: meta.recorder || '' }),
     '',
     '## recentMeetings (관련 회의록 후보)',
-    JSON.stringify(recent),
+    JSON.stringify(recent || []),
     '',
     '## 채록문',
     text || '(채록문 없음 — 첨부 자료만 정리)',
@@ -412,7 +417,7 @@ function analyze_(body) {
   if (!parsed) throw new Error('AI 응답을 해석하지 못했습니다: ' + (lastErr && lastErr.message));
 
   // 후보 ID 검증 (존재하는 회의록만)
-  const ids = recent.map(r => r.id);
+  const ids = (recent || []).map(r => r.id);
   parsed.relatedCandidates = (parsed.relatedCandidates || []).filter(c => c && ids.indexOf(c.id) >= 0)
     .map(c => Object.assign(c, recent.find(r => r.id === c.id)));
   // 자료 번호 → 파일 이름(source)을 붙여 둔다
@@ -422,6 +427,56 @@ function analyze_(body) {
   });
   parsed.model = CFG.claudeModel;
   return parsed;
+}
+
+// v2.6: 저장된 회의록을 채록문 + 저장된 첨부(AI 정리 대상)로 다시 정리해 본문 1~5단을 바꾼다.
+//       제목·날짜·장소·참석자·기록자·관련 회의록은 그대로. 바꾸기 전 본문은 prevVersion에 한 벌 남긴다.
+//       첨부 원본: PPT·문서는 저장된 extractedText, PDF·사진은 드라이브 원본을 다시 읽는다.
+const MAX_REREAD = 20 * 1024 * 1024;
+function reanalyze_(body) {
+  const id = body.id;
+  if (!id) throw new Error('id가 없습니다');
+  const doc = getDoc_(id);
+  const atts = doc.attachments || [];
+  const handouts = [];
+  atts.forEach((a, ai) => {
+    if (!a || a.type !== 'handout') return;
+    const h = { name: a.name || '', kind: a.kind || 'image', mime: '', data: '', extractedText: a.extractedText || '', _ai: ai };
+    if (h.kind !== 'doc' && a.driveFileId) {
+      try {
+        const blob = DriveApp.getFileById(a.driveFileId).getBlob();
+        if (blob.getBytes().length <= MAX_REREAD) {
+          h.mime = h.kind === 'pdf' ? 'application/pdf' : (blob.getContentType() || 'image/jpeg');
+          h.data = Utilities.base64Encode(blob.getBytes());
+        }
+      } catch (e) { /* 드라이브에서 지워진 파일은 extractedText만 */ }
+    }
+    if (h.kind === 'doc' && !h.extractedText) return;
+    if (!h.data && !h.extractedText) return;
+    handouts.push(h);
+  });
+  const text = String(doc.rawText || '').trim();
+  if (!text && !handouts.length) throw new Error('다시 정리할 채록문·첨부 자료가 없습니다');
+
+  const meta = { title: doc.title, date: doc.date, place: doc.place, attendees: doc.attendees || [], recorder: doc.recorder };
+  const a = analyzeCore_(text, meta, handouts, []);
+
+  // 유인물 사진의 인식 글자를 첨부에 붙여 둔다
+  (a.handoutText || []).forEach(t => {
+    const h = handouts[(Number(t.index) || 0) - 1];
+    if (h && h.kind === 'image' && t.text) atts[h._ai].extractedText = String(t.text).slice(0, MAX_EXTRACT);
+  });
+
+  const norm = normalizeDoc_({ speakers: a.speakers, topics: a.topics, proposals: a.proposals, checks: a.checks, materials: a.materials, summary: a.summary, keywords: a.keywords });
+  const prev = { savedAt: new Date() };
+  ['speakers', 'topics', 'proposals', 'checks', 'materials', 'summary', 'keywords'].forEach(k => { prev[k] = doc[k] === undefined ? null : doc[k]; });
+  patchDoc_(id, {
+    speakers: norm.speakers, topics: norm.topics, proposals: norm.proposals, checks: norm.checks,
+    materials: norm.materials.map(m => ({ title: m.title, source: m.source, items: m.items })),
+    summary: norm.summary || doc.summary || '', keywords: norm.keywords.length ? norm.keywords : (doc.keywords || []),
+    attachments: atts, prevVersion: prev, reanalyzedAt: new Date(), updatedAt: new Date(),
+  });
+  return getDoc_(id);
 }
 
 function recentForMatch_() {

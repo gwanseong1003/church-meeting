@@ -132,7 +132,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v2.5';
+const APP_VERSION = 'v2.6';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -527,7 +527,7 @@ async function bulletizeSpeakers(){
 }
 function rerenderSections(){ Object.keys(SEC).forEach(k=>{ $(`#el_${k}`).outerHTML=editListHtml(k,S.draft[k]||[]); }); }
 
-function formHtml(d, candidates, existingRelated){
+function formHtml(d, candidates, existingRelated, editMode){
   const cands = candidates||[];
   return `
   <div class="card">
@@ -546,7 +546,7 @@ function formHtml(d, candidates, existingRelated){
   </div>
   <div class="card">
     <h2>회의 내용</h2>
-    ${Object.entries(SEC).map(([k,name])=>`<div class="sec-label">${name}</div>${k==='speakers'?`<button class="btn" style="margin:0 0 8px 8px;padding:5px 10px;font-size:13px" onclick="bulletizeSpeakers()">AI로 개조식 바꾸기</button>`:''}${editListHtml(k,d[k]||[])}`).join('')}
+    ${Object.entries(SEC).map(([k,name])=>`<div class="sec-label">${name}</div>${k==='speakers'?`<button class="btn" style="margin:0 0 8px 8px;padding:5px 10px;font-size:13px" onclick="bulletizeSpeakers()">AI로 개조식 바꾸기</button>`:''}${editListHtml(k,d[k]||[])}${k==='materials'&&editMode?matUploadHtml():''}`).join('')}
   </div>
   <div class="card">
     <h2>관련 회의록</h2>
@@ -800,18 +800,27 @@ async function renderEdit(id){
   const existing=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)||{id:rid,title:rid,date:''});
   const others=S.items.filter(x=>x.id!==id && !(d.related||[]).includes(x.id)).slice(0,30);
   $('#app').innerHTML = `
-  ${formHtml(S.draft, [], existing)}
+  ${formHtml(S.draft, [], existing, true)}
   <div class="card"><h2>관련 회의록 추가</h2>
     <select id="addRel"><option value="">선택…</option>${others.map(x=>`<option value="${x.id}">${esc(fmtDate(x.date)+' '+x.title)}</option>`).join('')}</select>
     <div class="actions"><button class="btn" onclick="addRelated()">연결 추가</button></div>
   </div>
   <div class="card" id="attCard"></div>
-  <div class="card"><h2>자료 추가</h2><p class="muted" style="margin:0 0 8px">여기서 추가한 자료는 드라이브에 보관만 됩니다(내용 정리는 위 「5. 첨부 자료 내용」에 직접 적어주세요).</p><input type="file" id="fImg" accept="${FILE_ACCEPT}" multiple onchange="addImages(this)"><div class="thumbs" id="thumbs"></div></div>
   <div class="actions">
     <button class="btn" onclick="go('detail','${id}')">취소</button>
     <button class="btn primary" style="flex:1" onclick="saveEdit('${id}')">저장</button>
   </div>`;
   drawAttEdit();
+}
+// v2.6: 「5. 첨부 자료 내용」 안에서 파일 첨부 → 저장하면 채록문+모든 첨부(AI 정리)로 1~5단을 다시 정리
+function matUploadHtml(){
+  return `<div class="mat-up" style="margin:10px 0 4px;padding:10px;border:1px dashed var(--line,#ccc);border-radius:10px">
+    <label style="margin-top:0">자료 파일 첨부 (사진·PDF·PPTX·DOCX·HWPX)</label>
+    <input type="file" id="fImg" accept="${FILE_ACCEPT}" multiple onchange="addImages(this)">
+    <div class="thumbs" id="thumbs"></div>
+    <p class="muted" style="margin:6px 0 8px">새 파일을 넣고 「저장」하면, 채록문과 첨부 자료(「AI 정리」로 둔 것) 전체를 AI가 읽어 회의록 1~5를 다시 정리합니다. 파일 없이 다시 정리하려면 아래 버튼을 누르세요.</p>
+    <button class="btn" style="padding:6px 12px;font-size:13px" onclick="saveEdit(S.draft.id,true)">첨부 자료 포함해 AI로 다시 정리</button>
+  </div>`;
 }
 // v2.3: 이미 저장된 첨부를 수정 화면에서 빼기(저장해야 반영, 드라이브 원본은 휴지통으로)
 function drawAttEdit(){
@@ -829,14 +838,22 @@ function addRelated(){
   relCard.insertAdjacentHTML('beforeend',`<div class="related-cand"><input type="checkbox" class="cand" value="${x.id}" checked><div><b>${esc(x.title)}</b> <span class="meta-line">${fmtDate(x.date)}</span></div></div>`);
   sel.querySelector(`option[value="${rid}"]`).remove(); sel.value='';
 }
-async function saveEdit(id){
+async function saveEdit(id, forceRe){
   const d=collectForm(S.draft);
+  const newAi=S.images.some(i=>i.type==='handout');
+  const re=forceRe||newAi;
+  if(re && !confirm('채록문과 첨부 자료를 AI가 다시 읽어 회의록 1~5(개인별 발언·주제별·종합 제안·확인 필요·첨부 자료 내용)를 새로 정리합니다.\n직접 고친 내용은 새 정리로 바뀝니다(바로 전 내용은 서버에 한 벌 남겨 둡니다).\n1~3분 걸립니다. 진행할까요?')) return;
   try{
     busy(true,'저장 중…');
     const images=S.images.map(i=>({name:i.name,kind:i.kind,mime:i.mime,data:i.data,type:i.type,extractedText:i.extractedText||''}));
     const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related,attachments:d.attachments||[]};
     await api('update',{id, doc:payload, images});
-    S.images=[]; toast('수정했습니다');
+    S.images=[];
+    if(re){
+      busy(true,'AI가 첨부 자료까지 포함해 회의록을 다시 정리하고 있습니다… (1~3분)');
+      const r=await api('reanalyze',{id}); S.current=normDoc(r.item);
+      toast('첨부 자료까지 반영해 다시 정리했습니다');
+    } else toast('수정했습니다');
     const r=await api('list',{limit:300}); S.items=r.items||[];
     go('detail',id);
   }catch(e){ toast(e.message); } finally{ busy(false); }
