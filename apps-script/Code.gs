@@ -26,6 +26,8 @@ const CFG = {
   driveFolderId: PROPS.getProperty('DRIVE_FOLDER_ID') || '',
   recentForMatch: 30,
 };
+// v3.1: 부서. 화면 선택지와 같게 둔다(index.html DEPTS)
+const DEPTS = ['공동의회', '당회', '제직회', '목회협의회', '이끄미', '비타키즈', '베리키즈', '비아틴즈', '비컨청년부', '교역자'];
 
 // ───────────────────────────── 진입점 ─────────────────────────────
 
@@ -42,18 +44,18 @@ function doPost(e) {
     if (!checkToken_(body.token)) return json_({ ok: false, error: '로그인이 필요합니다', code: 'AUTH' });
 
     switch (action) {
-      case 'list':    return json_({ ok: true, items: listDocs_(body.limit || 200) });
-      case 'get':     return json_({ ok: true, item: getDoc_(body.id) });
+      case 'list':    return json_({ ok: true, items: listDocs_(body.limit || 200).map(listView_) });
+      case 'get':     return json_({ ok: true, item: outDoc_(openDoc_(body.id, body.docPass)) });
       case 'analyze': return json_({ ok: true, result: analyze_(body) });
       case 'bulletize': return json_({ ok: true, speakers: bulletize_(body) });
-      case 'reanalyze': return json_({ ok: true, item: reanalyze_(body) });
+      case 'reanalyze': openDoc_(body.id, body.docPass); return json_({ ok: true, item: outDoc_(reanalyze_(body)) });
       case 'save':    return json_({ ok: true, id: saveDoc_(body) });
       case 'update':  return json_({ ok: true, id: updateDoc_(body) });
-      case 'delete':  deleteDoc_(body.id); return json_({ ok: true });
+      case 'delete':  openDoc_(body.id, body.docPass); deleteDoc_(body.id); return json_({ ok: true });
       default:        return json_({ ok: false, error: '알 수 없는 요청: ' + action });
     }
   } catch (err) {
-    return json_({ ok: false, error: String(err && err.message || err) });
+    return json_({ ok: false, error: String(err && err.message || err), code: err && err.code || undefined });
   }
 }
 
@@ -82,6 +84,41 @@ function makeToken_() {
 
 function checkToken_(token) {
   return !!token && token === makeToken_();
+}
+
+// ───────────── 회의록 비밀번호(v3.1) ─────────────
+// 비밀번호를 넣고 저장한 회의록은 비공개(isPrivate). 비밀번호 자체는 저장하지 않고 HMAC 값(passHash)만 둔다.
+// passHash는 어떤 응답으로도 내보내지 않는다. 비공개 회의록은 목록에 날짜·부서만 나간다.
+function passHash_(pass) {
+  return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(String(pass), 'meeting-minutes-doc-v1'));
+}
+function codeErr_(msg, code) { const e = new Error(msg); e.code = code; return e; }
+// 비밀번호 확인 후 문서를 돌려준다. 같은 회의록에 5번 틀리면 10분 잠금
+function openDoc_(id, pass) {
+  const doc = getDoc_(id);
+  if (!doc.isPrivate) return doc;
+  const cache = CacheService.getScriptCache(), key = 'pf_' + id;
+  const fails = Number(cache.get(key) || 0);
+  if (fails >= 5) throw codeErr_('비밀번호를 5번 틀려 10분 동안 열 수 없습니다', 'LOCKED');
+  if (!pass) throw codeErr_('비공개 회의록입니다. 비밀번호를 넣어주세요', 'PRIVATE');
+  if (passHash_(pass) !== doc.passHash) {
+    cache.put(key, String(fails + 1), 600);
+    throw codeErr_('비밀번호가 틀립니다', 'PRIVATE');
+  }
+  cache.remove(key);
+  return doc;
+}
+function outDoc_(doc) { const o = Object.assign({}, doc); delete o.passHash; o.isPrivate = !!o.isPrivate; return o; }
+function listView_(o) {
+  if (o.isPrivate) return { id: o.id, date: o.date, dept: o.dept || '', isPrivate: true };
+  return outDoc_(o);
+}
+// newPass가 문자열로 오면 공개/비공개를 정한다(빈 문자열 = 공개)
+function applyPass_(doc, newPass) {
+  if (typeof newPass !== 'string') return;
+  const p = newPass.trim();
+  doc.isPrivate = !!p;
+  doc.passHash = p ? passHash_(p) : '';
 }
 
 // ───────────────────────────── Firestore ─────────────────────────────
@@ -197,6 +234,7 @@ function normalizeDoc_(d) {
   const arr = v => Array.isArray(v) ? v.map(x => typeof x === 'string' ? x.trim() : x).filter(x => x !== '' && x !== null) : [];
   return {
     title: String(d.title || '').trim() || '제목 없음',
+    dept: DEPTS.indexOf(String(d.dept || '').trim()) >= 0 ? String(d.dept).trim() : '',
     date: String(d.date || '').slice(0, 10),
     place: String(d.place || '').trim(),
     attendees: arr(d.attendees),
@@ -221,6 +259,7 @@ function saveDoc_(body) {
   const now = new Date();
   doc.createdAt = now;
   doc.updatedAt = now;
+  applyPass_(doc, typeof body.newPass === 'string' ? body.newPass : '');
   const id = createDoc_(doc);
 
   // 사진 업로드 (저장 뒤 문서 ID 폴더에)
@@ -238,9 +277,10 @@ function saveDoc_(body) {
 function updateDoc_(body) {
   const id = body.id;
   if (!id) throw new Error('id가 없습니다');
-  const before = getDoc_(id);
+  const before = openDoc_(id, body.docPass);
   const doc = normalizeDoc_(Object.assign({}, before, body.doc || {}));
   doc.updatedAt = new Date();
+  applyPass_(doc, body.newPass);
 
   // v2.3: 수정 화면에서 뺀 첨부는 드라이브에서도 휴지통으로(30일 안에 드라이브에서 복구 가능)
   if (body.doc && Array.isArray(body.doc.attachments)) {

@@ -97,6 +97,16 @@
   .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:.2s;z-index:30;pointer-events:none;max-width:90vw}
   .toast.on{opacity:1}
   .search{display:flex;gap:8px;margin-bottom:12px}
+  /* v3.1: 부서 고르기 · 비공개 */
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+  .chip{border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .chip small{opacity:.7;margin-left:3px}
+  .tag.dept{background:#ece7f6;color:#5a3f8f}
+  .tag.lock{background:#f1e9e7;color:var(--danger)}
+  .list-item.locked .t{color:var(--muted)}
+  .dept-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .lock-hint{font-size:12px;color:var(--muted);margin:4px 0 0}
   .search input{flex:1}
   .related-cand{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:6px;display:flex;gap:8px;align-items:flex-start}
   .related-cand input{margin-top:4px}
@@ -153,7 +163,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v3.0';
+const APP_VERSION = 'v3.1';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -164,7 +174,19 @@ const S = {
   draft: null,       // 새 회의록 / 수정 중인 데이터
   images: [],        // {name,mime,data(base64),type,preview}
   view: 'list',
+  pass: {},          // v3.1: 이번에 연 비공개 회의록 비밀번호(id→비밀번호). 메모리에만, 새로고침하면 다시 물음
 };
+// v3.1: 부서 (서버 Code.gs DEPTS와 같게)
+const DEPTS=['공동의회','당회','제직회','목회협의회','이끄미','비타키즈','베리키즈','비아틴즈','비컨청년부','교역자'];
+const deptOpts=sel=>`<option value="">부서 선택</option>`+DEPTS.map(x=>`<option ${x===sel?'selected':''}>${x}</option>`).join('');
+// 부서 + 비밀번호 칸(새 회의록·확인·수정 화면 공용). 비밀번호를 넣으면 비공개, 비우면 공개
+function deptRowHtml(pre,dept,pass){
+  return `<div class="dept-row">
+      <div><label>부서</label><select id="${pre}Dept">${deptOpts(dept)}</select></div>
+      <div><label>비밀번호 <span style="font-weight:400">(선택)</span></label><input type="password" id="${pre}Pass" value="${esc(pass||'')}" autocomplete="new-password" placeholder="비우면 공개"></div>
+    </div>
+    <p class="lock-hint">🔒 비밀번호를 넣으면 비공개(열 때 비밀번호 필요, 목록엔 날짜·부서만 보임), 비우면 누구나 볼 수 있는 공개입니다.</p>`;
+}
 // 회의록 본문 4단 구성 (샘플 양식)
 // v2.1: 5. 첨부 자료 내용(유인물 사진·PDF·PPT·문서를 AI가 요약) 추가 — 기존 1~4 번호는 그대로 둠
 const SEC = { speakers:'1. 개인별 발언 정리', topics:'2. 주제별 정리', proposals:'3. 종합 제안', checks:'4. 확인이 필요한 사항', materials:'5. 첨부 자료 내용' };
@@ -208,7 +230,7 @@ async function api(action, payload={}){
   const data = await res.json();
   if (!data.ok) {
     if (data.code === 'AUTH') { logout(false); throw new Error('다시 로그인해주세요'); }
-    throw new Error(data.error || '요청 실패');
+    const err=new Error(data.error || '요청 실패'); err.code=data.code; throw err;
   }
   return data;
 }
@@ -255,6 +277,7 @@ async function renderList(){
     <div class="actions" style="margin:0 0 12px">
       <button class="btn primary" onclick="go('new')">＋ 새 회의록</button>
     </div>
+    <div class="chips" id="deptChips"></div>
     <div class="search"><input type="text" id="q" placeholder="제목·참석자·내용 검색" oninput="drawList()"></div>
     <div id="listBox"><div class="empty">불러오는 중…</div></div>`;
   try{
@@ -265,19 +288,36 @@ async function renderList(){
 }
 function matches(d,q){
   if(!q) return true;
-  const hay=[d.title,d.date,d.place,d.recorder,d.summary,...(d.attendees||[]),...(d.keywords||[]),
+  const hay=[d.dept,d.title,d.date,d.place,d.recorder,d.summary,...(d.attendees||[]),...(d.keywords||[]),
     ...(d.speakers||[]).map(x=>x.text||x),...(d.topics||[]).flatMap(t=>[t.title,...(t.items||[])]),
     ...(d.proposals||[]).flatMap(x=>[x.item,x.action]),...(d.checks||[]),...(d.materials||[]).flatMap(t=>[t.title,t.source,...(t.items||[])])].join(' ').toLowerCase();
   return q.toLowerCase().split(/\s+/).filter(Boolean).every(w=>hay.includes(w));
 }
+// v3.1: 부서 고르기(이 기기에 기억). '' = 전체, '-' = 부서 미지정(옛 회의록)
+let deptFilter=''; try{ deptFilter=localStorage.getItem('mm_dept_filter')||''; }catch(e){}
+function setDept(k){ deptFilter=k; try{ localStorage.setItem('mm_dept_filter',k); }catch(e){} drawList(); }
+function drawChips(){
+  const el=$('#deptChips'); if(!el) return;
+  const cnt=k=>S.items.filter(d=>(d.dept||'-')===k).length;
+  const none=cnt('-');
+  if(deptFilter && deptFilter!=='-' && !DEPTS.includes(deptFilter)) deptFilter='';
+  if(deptFilter==='-' && !none) deptFilter='';
+  const chip=(k,label,n)=>`<button class="chip${deptFilter===k?' on':''}" onclick="setDept('${k}')">${esc(label)}${n!==undefined?`<small>${n}</small>`:''}</button>`;
+  el.innerHTML=chip('','전체',S.items.length)+DEPTS.map(x=>chip(x,x,cnt(x))).join('')+(none?chip('-','부서 미지정',none):'');
+}
 function drawList(){
+  drawChips();
   const q=($('#q')||{}).value||'';
-  const rows=S.items.filter(d=>matches(d,q));
-  if(!rows.length){ $('#listBox').innerHTML=`<div class="empty">${S.items.length?'검색 결과가 없습니다':'아직 회의록이 없습니다. 새 회의록을 만들어보세요.'}</div>`; return; }
+  const rows=S.items.filter(d=>(!deptFilter||(d.dept||'-')===deptFilter)&&matches(d,q));
+  if(!rows.length){ $('#listBox').innerHTML=`<div class="empty">${!S.items.length?'아직 회의록이 없습니다. 새 회의록을 만들어보세요.':q?'검색 결과가 없습니다':'이 부서의 회의록이 없습니다'}</div>`; return; }
   $('#listBox').innerHTML = rows.map(d=>{
+    if(d.isPrivate) return `<div class="list-item locked" onclick="go('detail','${d.id}')">
+      <div class="t">🔒 비공개 회의록</div>
+      <div class="m">${d.dept?`<span class="tag dept">${esc(d.dept)}</span> `:''}${fmtDate(d.date)}</div>
+    </div>`;
     return `<div class="list-item" onclick="go('detail','${d.id}')">
       <div class="t">${esc(d.title)}</div>
-      <div class="m">${fmtDate(d.date)}${d.place?' · '+esc(d.place):''}${d.recorder?' · 기록 '+esc(d.recorder):''}</div>
+      <div class="m">${d.dept?`<span class="tag dept">${esc(d.dept)}</span> `:''}${fmtDate(d.date)}${d.place?' · '+esc(d.place):''}${d.recorder?' · 기록 '+esc(d.recorder):''}</div>
       ${d.summary?`<div class="s">${esc(d.summary)}</div>`:''}
       <div>${(d.topics||[]).length?`<span class="tag">주제 ${d.topics.length}</span>`:''}${(d.proposals||[]).length?`<span class="tag ok">제안 ${d.proposals.length}</span>`:''}${(d.checks||[]).length?`<span class="tag warn">확인 ${d.checks.length}</span>`:''}${(d.materials||[]).length?`<span class="tag">자료 ${d.materials.length}</span>`:''}</div>
     </div>`;
@@ -292,7 +332,8 @@ function renderNew(){
   $('#app').innerHTML = `
   <div class="card">
     <h2>회의 정보</h2>
-    <label>제목</label><input type="text" id="fTitle" placeholder="예: 10월 윈드오케스트라 운영회의">
+    ${deptRowHtml('f', last.dept||'', '')}
+    <label>제목</label><input type="text" id="fTitle" placeholder="예: 10월 제직회">
     <div class="row">
       <div><label>날짜</label><input type="date" id="fDate" value="${today()}"></div>
       <div><label>장소</label><input type="text" id="fPlace" value="${esc(last.place||'')}"></div>
@@ -471,6 +512,7 @@ function shrinkImage(file, maxSide, quality){
 }
 function readMeta(){
   return {
+    dept:$('#fDept').value, pass:$('#fPass').value.trim(),
     title:$('#fTitle').value.trim(), date:$('#fDate').value, place:$('#fPlace').value.trim(),
     attendees:$('#fAtt').value.split(/[,，、]/).map(s=>s.trim()).filter(Boolean), recorder:$('#fRec').value.trim()
   };
@@ -482,16 +524,18 @@ async function runAnalyze(){
   const forAi=S.images.map(i=>({name:i.name,kind:i.kind,mime:i.mime,type:i.type,data:i.type==='handout'&&i.kind!=='doc'?i.data:'',extractedText:i.kind==='doc'?i.extractedText:''}));
   const aiBytes=forAi.reduce((a,i)=>a+(i.data||'').length,0);
   if(aiBytes>28*MB){ toast(`AI에 보낼 자료가 너무 큽니다(${Math.round(aiBytes*0.75/MB)}MB). PDF·사진 일부를 「보관만」으로 바꾸거나 빼주세요`); return; }
+  if(!meta.dept){ toast('부서를 골라주세요'); $('#fDept').focus(); return; }
   if(!meta.recorder){ toast('기록자 이름을 넣어주세요'); $('#fRec').focus(); return; }
-  localStorage.setItem('mm_last', JSON.stringify({place:meta.place, recorder:meta.recorder}));
+  localStorage.setItem('mm_last', JSON.stringify({place:meta.place, recorder:meta.recorder, dept:meta.dept}));
   try{
     busy(true,'AI가 회의록을 정리하고 있습니다…');
-    const r = await api('analyze',{text, meta, images:forAi});
+    const r = await api('analyze',{text, meta:Object.assign({},meta,{pass:undefined}), images:forAi});
     const a=r.result;
     // 유인물 사진의 인식 텍스트를 첨부 메타에 연결(자료 번호는 1부터, AI 정리 대상만 셈)
     const hand=S.images.filter(i=>i.type==='handout');
     (a.handoutText||[]).forEach(h=>{ const it=hand[(+h.index||0)-1]; if(it&&it.kind==='image') it.extractedText=h.text||''; });
     S.draft = {
+      dept: meta.dept, _pass: meta.pass,
       title: meta.title || (a.summary ? a.summary.slice(0,30) : '회의록'),
       date: meta.date || a.date || today(), place: meta.place || a.place || '',
       attendees: meta.attendees.length? meta.attendees : (a.attendees||[]), recorder: meta.recorder,
@@ -517,6 +561,7 @@ function editListHtml(key, arr){
   return `<div class="edit-list" id="el_${key}">${body}<button class="add" onclick="addItem('${key}')">＋ 항목 추가</button></div>`;
 }
 function collectForm(d){
+  d.dept=$('#eDept').value; d._pass=$('#ePass').value.trim();
   d.title=$('#eTitle').value.trim(); d.date=$('#eDate').value; d.place=$('#ePlace').value.trim();
   d.attendees=$('#eAtt').value.split(/[,，、]/).map(s=>s.trim()).filter(Boolean); d.recorder=$('#eRec').value.trim();
   d.summary=$('#eSum').value.trim(); d.keywords=$('#eKw').value.split(/[,，、]/).map(s=>s.trim()).filter(Boolean);
@@ -552,6 +597,7 @@ function formHtml(d, candidates, existingRelated, editMode){
   return `
   <div class="card">
     <h2>회의 정보</h2>
+    ${deptRowHtml('e', d.dept||'', d._pass||'')}
     <label>제목</label><input type="text" id="eTitle" value="${esc(d.title)}">
     <div class="row">
       <div><label>날짜</label><input type="date" id="eDate" value="${esc(d.date)}"></div>
@@ -592,11 +638,13 @@ function renderReview(){
 async function saveNew(){
   const d=collectForm(S.draft);
   if(!d.title){ toast('제목을 넣어주세요'); return; }
+  if(!d.dept){ toast('부서를 골라주세요'); $('#eDept').focus(); return; }
   try{
     busy(true,'저장 중…');
     const images=S.images.map(i=>({name:i.name,kind:i.kind,mime:i.mime,data:i.data,type:i.type,extractedText:i.extractedText||''}));
-    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related,rawText:d.rawText};
-    const r=await api('save',{doc:payload, images});
+    const payload={dept:d.dept,title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related,rawText:d.rawText};
+    const r=await api('save',{doc:payload, images, newPass:d._pass||''});
+    if(d._pass) S.pass[r.id]=d._pass;
     S.images=[]; S.draft=null; toast('저장했습니다');
     go('detail', r.id);
   }catch(e){ toast(e.message); } finally{ busy(false); }
@@ -607,9 +655,13 @@ async function renderDetail(id){
   $('#hTitle').textContent='높은뜻안성교회 회의록';
   $('#app').innerHTML='<div class="empty">불러오는 중…</div>';
   try{
-    const r=await api('get',{id}); const d=normDoc(r.item); S.current=d;
+    let r;
+    try{ r=await api('get',{id, docPass:S.pass[id]||''}); }
+    catch(e){ if(e.code==='PRIVATE'||e.code==='LOCKED'){ delete S.pass[id]; renderUnlock(id, S.pass._tried===id?e.message:''); S.pass._tried=id; return; } throw e; }
+    delete S.pass._tried;
+    const d=normDoc(r.item); S.current=d;
     const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
-    const sub=[fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).map(esc).join(' · ');
+    const sub=[d.dept, fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).map(esc).join(' · ');
     // v2.4: 항목 앞 체크 → 체크한 것만 Word로. 칸 전체 체크는 이 기기에 기억(mm_docx_off)
     let off=new Set(); try{ off=new Set(JSON.parse(localStorage.getItem('mm_docx_off')||'[]')); }catch(e){}
     const on=k=>off.has(k)?'':'checked';
@@ -622,7 +674,7 @@ async function renderDetail(id){
       <h2 class="doc-title">${esc(d.title)}</h2>
       <div class="doc-sub">${sub}</div>
       <p class="doc-intro xi${offc('intro')}" data-k="intro"><label style="display:flex;align-items:flex-start;cursor:pointer">${sk('intro')}<span>${esc(introText(d))}${d.summary?'<br>'+esc(d.summary):''}</span></label></p>
-      <div>${(d.keywords||[]).map(k=>`<span class="tag">${esc(k)}</span>`).join('')}</div>
+      <div>${d.isPrivate?'<span class="tag lock">🔒 비공개</span>':''}${(d.keywords||[]).map(k=>`<span class="tag">${esc(k)}</span>`).join('')}</div>
     </div>
     ${d.speakers.length?`<div class="card"><h2 class="sec-t">${sk('speakers')}${SEC.speakers}</h2><table class="tb"><thead><tr><th style="width:120px">발언자</th><th>발언 내용</th></tr></thead><tbody>${d.speakers.map((v,i)=>`<tr class="xi${offc('speakers')}" data-k="speakers" data-i="${i}"><td class="k"><label>${ik('speakers',i)}${esc(v.speaker)}</label></td><td>${spCell(v.text)}</td></tr>`).join('')}</tbody></table></div>`:''}
     ${d.topics.length?`<div class="card"><h2 class="sec-t">${sk('topics')}${SEC.topics}</h2>${d.topics.map((t,i)=>`<div class="xi${offc('topics')}" data-k="topics" data-i="${i}"><label class="topic" style="display:block;cursor:pointer">${ik('topics',i)}${circ(i)} ${esc(t.title)}</label><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul></div>`).join('')}</div>`:''}
@@ -648,9 +700,25 @@ async function renderDetail(id){
     </div>`;
   }catch(e){ $('#app').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
 }
+// v3.1: 비공개 회의록 열기
+function renderUnlock(id, msg){
+  const it=S.items.find(x=>x.id===id)||{};
+  $('#app').innerHTML=`<div class="card" style="max-width:380px;margin:30px auto">
+    <h2>🔒 비공개 회의록</h2>
+    <p class="muted" style="margin:0 0 6px">${esc([it.dept,fmtDate(it.date)].filter(Boolean).join(' · '))}</p>
+    <label>비밀번호</label><input type="password" id="uPass" autocomplete="off">
+    ${msg?`<p style="color:var(--danger);font-size:13px;margin:6px 0 0">${esc(msg)}</p>`:''}
+    <div class="actions"><button class="btn" onclick="go('list')">목록</button><button class="btn primary" style="flex:1" onclick="unlockDoc('${id}')">열기</button></div>
+  </div>`;
+  const u=$('#uPass'); u.focus(); u.addEventListener('keydown',e=>{ if(e.key==='Enter') unlockDoc(id); });
+}
+function unlockDoc(id){
+  const p=$('#uPass').value.trim(); if(!p){ toast('비밀번호를 넣어주세요'); return; }
+  S.pass[id]=p; S.pass._tried=id; renderDetail(id);
+}
 async function delDoc(id){
   if(!confirm('이 회의록을 삭제할까요? 되돌릴 수 없습니다.')) return;
-  try{ busy(true,'삭제 중…'); await api('delete',{id}); toast('삭제했습니다'); go('list'); }
+  try{ busy(true,'삭제 중…'); await api('delete',{id, docPass:S.pass[id]||''}); delete S.pass[id]; toast('삭제했습니다'); go('list'); }
   catch(e){ toast(e.message); } finally{ busy(false); }
 }
 
@@ -703,7 +771,7 @@ function buildDocxBlob(d, relDocs, o={}){
   const table=(widths,head,rows)=>`<w:tbl><w:tblPr><w:tblW w:w="${widths.reduce((a,b)=>a+b,0)}" w:type="dxa"/><w:tblBorders>${bord}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="70" w:type="dxa"/><w:left w:w="110" w:type="dxa"/><w:bottom w:w="70" w:type="dxa"/><w:right w:w="110" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${widths.map(w=>`<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`
     +`<w:tr><w:trPr><w:tblHeader/></w:trPr>${head.map((h,i)=>cell(widths[i],wPara(wRun(h,{b:1}),{after:0}),'DCE6F1')).join('')}</w:tr>`
     +rows.map(r=>`<w:tr><w:trPr><w:cantSplit/></w:trPr>${r.map((c,i)=>cell(widths[i],c.x,c.fill)).join('')}</w:tr>`).join('')+`</w:tbl>`;
-  const sub=[fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).join(' · ');
+  const sub=[d.dept, fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).join(' · ');
   // v2.2: o.keys(넣을 본문 칸)·o.intro·o.related·o.attach로 칸을 고름. 뺀 칸이 있으면 번호를 1부터 다시 매김
   const keys=(o.keys||Object.keys(SEC)).filter(k=>(d[k]||[]).length);
   const HS=k=>H1(`${keys.indexOf(k)+1}. ${secName(k)}`);
@@ -774,7 +842,7 @@ function exportDocxChecked(){ const c=checkedDoc(); if(c) exportDocx(c.o, c.d2);
 // v2.9: 인쇄/PDF — buildDocxBlob과 같은 구성·색·표를 HTML로 그려 그것만 인쇄
 function buildPrintHtml(d, o={}){
   normDoc(d);
-  const sub=[fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).join(' · ');
+  const sub=[d.dept, fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).join(' · ');
   const keys=(o.keys||Object.keys(SEC)).filter(k=>(d[k]||[]).length);
   const HS=k=>`<h2>${keys.indexOf(k)+1}. ${esc(secName(k))}</h2>`;
   const ul=a=>`<ul>${a.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`;
@@ -828,8 +896,9 @@ async function exportDocx(o={}, dOverride){
 /* ───────── 수정 ───────── */
 async function renderEdit(id){
   $('#hTitle').textContent='회의록 수정';
-  const d = S.current && S.current.id===id ? S.current : (await api('get',{id})).item;
+  const d = S.current && S.current.id===id ? S.current : (await api('get',{id, docPass:S.pass[id]||''})).item;
   S.draft = normDoc(JSON.parse(JSON.stringify(d))); S.images=[];
+  S.draft._pass = S.pass[id]||'';
   $('#app').innerHTML = `
   ${formHtml(S.draft, [], [], true)}
   <div class="card" id="attCard"></div>
@@ -859,18 +928,21 @@ function drawAttEdit(){
 }
 async function saveEdit(id, forceRe){
   const d=collectForm(S.draft);
+  if(!d.dept){ toast('부서를 골라주세요'); $('#eDept').focus(); return; }
+  if(d.isPrivate && !d._pass && !confirm('비밀번호 칸이 비어 있어 이 회의록이 「공개」로 바뀝니다. 계속할까요?')) return;
   const newAi=S.images.some(i=>i.type==='handout');
   const re=forceRe||newAi;
   if(re && !confirm('채록문과 첨부 자료를 AI가 다시 읽어 회의록 1~5(개인별 발언·주제별·종합 제안·확인 필요·첨부 자료 내용)를 새로 정리합니다.\n직접 고친 내용은 새 정리로 바뀝니다(바로 전 내용은 서버에 한 벌 남겨 둡니다).\n1~3분 걸립니다. 진행할까요?')) return;
   try{
     busy(true,'저장 중…');
     const images=S.images.map(i=>({name:i.name,kind:i.kind,mime:i.mime,data:i.data,type:i.type,extractedText:i.extractedText||''}));
-    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related,attachments:d.attachments||[]};
-    await api('update',{id, doc:payload, images});
+    const payload={dept:d.dept,title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related,attachments:d.attachments||[]};
+    await api('update',{id, doc:payload, images, docPass:S.pass[id]||'', newPass:d._pass||''});
+    if(d._pass) S.pass[id]=d._pass; else delete S.pass[id];
     S.images=[];
     if(re){
       busy(true,'AI가 첨부 자료까지 포함해 회의록을 다시 정리하고 있습니다… (1~3분)');
-      const r=await api('reanalyze',{id}); S.current=normDoc(r.item);
+      const r=await api('reanalyze',{id, docPass:S.pass[id]||''}); S.current=normDoc(r.item);
       toast('첨부 자료까지 반영해 다시 정리했습니다');
     } else toast('수정했습니다');
     const r=await api('list',{limit:300}); S.items=r.items||[];
