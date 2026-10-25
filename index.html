@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>높은뜻안성교회 회의록</title>
+<!-- v3.5: 홈 화면에 바로가기(PWA) -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2d5d8f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="회의록">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" href="icons/icon-192.png">
 <style>
   :root{
     --bg:#f6f5f2;--card:#fff;--ink:#1e1e1c;--muted:#6b6a66;--line:#e3e1dc;
@@ -163,7 +172,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v3.4';
+const APP_VERSION = 'v3.5';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -260,6 +269,35 @@ function logout(ask=true){
   S.token=''; localStorage.removeItem('mm_token'); go('login');
 }
 
+/* ───────── v3.5: 바탕화면(홈 화면)에 바로가기 ─────────
+   - 안드로이드 크롬·삼성 인터넷: 브라우저가 주는 설치 창(beforeinstallprompt)을 버튼으로 띄움
+   - 아이폰 사파리: 설치 창이 없어 「공유 → 홈 화면에 추가」 안내
+   - 이미 바로가기로 연 상태(standalone)면 버튼을 숨김 */
+let installEvt=null;
+window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); installEvt=e; const b=$('#installBtn'); if(b) b.classList.remove('hidden'); });
+window.addEventListener('appinstalled', ()=>{ installEvt=null; toast('바탕화면에 바로가기를 만들었습니다'); document.querySelectorAll('#installBtn').forEach(b=>b.classList.add('hidden')); });
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+const isIOS=()=>/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+function installBtnHtml(){
+  if(isStandalone()) return '';
+  return `<div style="max-width:380px;margin:12px auto 0;text-align:center"><button class="btn block" id="installBtn" onclick="installApp()">📲 바탕화면에 바로가기 아이콘 만들기</button></div>`;
+}
+async function installApp(){
+  if(installEvt){
+    const e=installEvt; installEvt=null;
+    e.prompt();
+    const r=await e.userChoice.catch(()=>({outcome:''}));
+    if(r.outcome!=='accepted'){ installEvt=e; toast('취소했습니다'); }
+    return;
+  }
+  const ios=isIOS(), ss=/SamsungBrowser/i.test(navigator.userAgent);
+  const how=ios?'사파리 아래쪽 「공유」(네모에 화살표) 버튼 → 「홈 화면에 추가」 → 「추가」를 누르세요.'
+    :ss?'화면 아래 「≡」 메뉴 → 「현재 페이지 추가」 → 「홈 화면」을 누르세요.'
+    :'크롬 오른쪽 위 「⋮」 메뉴 → 「홈 화면에 추가」(또는 「앱 설치」) → 「설치」를 누르세요.\n\n카카오톡 등 다른 앱 안에서 열었다면 먼저 「다른 브라우저로 열기」로 크롬에서 여세요.';
+  $('#app').insertAdjacentHTML('beforeend',`<div class="modal" id="installHow" onclick="if(event.target===this)this.remove()"><div class="card"><h2>바탕화면에 바로가기 만들기</h2><p style="white-space:pre-line;margin:0 0 6px">${esc(how)}</p><p class="muted" style="margin:0">바로가기로 열면 주소창 없이 앱처럼 열립니다.</p><div class="actions"><button class="btn primary block" onclick="$('#installHow').remove()">확인</button></div></div></div>`);
+}
+
 /* ───────── 로그인 ───────── */
 function renderLogin(){
   $('#hTitle').textContent='높은뜻안성교회 회의록';
@@ -270,7 +308,8 @@ function renderLogin(){
     <label>비밀번호</label><input type="password" id="lpw" autocomplete="current-password">
     <div class="actions"><button class="btn primary block" onclick="doLogin()">들어가기</button></div>
     <p class="muted" style="margin-top:14px">공용 계정으로 들어간 뒤 회의록마다 기록자 이름을 적습니다.</p>
-  </div>`;
+  </div>
+  ${installBtnHtml()}`;
   $('#lpw').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
 }
 async function doLogin(){
@@ -291,7 +330,8 @@ async function renderList(){
     </div>
     <div class="chips" id="deptChips"></div>
     <div class="search"><input type="text" id="q" placeholder="제목·참석자·내용 검색" oninput="drawList()"></div>
-    <div id="listBox"><div class="empty">불러오는 중…</div></div>`;
+    <div id="listBox"><div class="empty">불러오는 중…</div></div>
+    ${installBtnHtml()}`;
   try{
     const r = await api('list',{limit:300});
     S.items = r.items || [];
