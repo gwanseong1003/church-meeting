@@ -70,6 +70,14 @@
   .checkline{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:8px}
   .link{color:var(--accent);text-decoration:none;cursor:pointer}
   @media (max-width:480px){.row{flex-direction:column;gap:0}}
+  @media print{
+    header,.actions,.toast,.overlay,details summary{display:none!important}
+    body{background:#fff;font-size:12pt}
+    main{max-width:none;padding:0}
+    .card{border:0;padding:0 0 8px;break-inside:avoid-page}
+    .thumbs,input[type=checkbox]{display:none}
+    details:not([open])>*:not(summary){display:none}
+  }
 </style>
 </head>
 <body>
@@ -407,6 +415,8 @@ async function renderDetail(id){
     </div>
     ${d.rawText?`<div class="card"><details><summary class="muted" style="cursor:pointer">원본 채록문 보기</summary><pre class="raw" style="margin-top:8px;max-height:none">${esc(d.rawText)}</pre></details></div>`:''}
     <div class="actions">
+      <button class="btn primary" onclick="exportDocx()">Word 저장 (.docx)</button>
+      <button class="btn" onclick="window.print()">인쇄 / PDF</button>
       <button class="btn" onclick="copyText()">텍스트 복사</button>
       <button class="btn" onclick="go('edit','${d.id}')">수정</button>
       <button class="btn danger" onclick="delDoc('${d.id}')">삭제</button>
@@ -433,6 +443,86 @@ async function delDoc(id){
   if(!confirm('이 회의록을 삭제할까요? 되돌릴 수 없습니다.')) return;
   try{ busy(true,'삭제 중…'); await api('delete',{id}); toast('삭제했습니다'); go('list'); }
   catch(e){ toast(e.message); } finally{ busy(false); }
+}
+
+/* EXPORT-START */
+/* ───────── 내보내기: Word(.docx) — 라이브러리 없이 직접 압축(zip, 무압축) ───────── */
+const _crcT=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(u8){ let c=0xFFFFFFFF; for(let i=0;i<u8.length;i++) c=_crcT[(c^u8[i])&255]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function makeZip(files){
+  const enc=new TextEncoder(), parts=[], central=[]; let offset=0;
+  for(const f of files){
+    const name=enc.encode(f.name), data=enc.encode(f.text), crc=crc32(data);
+    const lh=new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true); lh.setUint16(8,0,true);
+    lh.setUint16(10,0,true); lh.setUint16(12,0x21,true); lh.setUint32(14,crc,true); lh.setUint32(18,data.length,true);
+    lh.setUint32(22,data.length,true); lh.setUint16(26,name.length,true); lh.setUint16(28,0,true);
+    parts.push(new Uint8Array(lh.buffer),name,data);
+    const ch=new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true); ch.setUint16(8,0x0800,true); ch.setUint16(10,0,true);
+    ch.setUint16(12,0,true); ch.setUint16(14,0x21,true); ch.setUint32(16,crc,true); ch.setUint32(20,data.length,true);
+    ch.setUint32(24,data.length,true); ch.setUint16(28,name.length,true); ch.setUint32(42,offset,true);
+    central.push(new Uint8Array(ch.buffer),name);
+    offset+=30+name.length+data.length;
+  }
+  const cdSize=central.reduce((a,b)=>a+b.length,0);
+  const end=new DataView(new ArrayBuffer(22));
+  end.setUint32(0,0x06054b50,true); end.setUint16(8,files.length,true); end.setUint16(10,files.length,true);
+  end.setUint32(12,cdSize,true); end.setUint32(16,offset,true);
+  return new Blob([...parts,...central,new Uint8Array(end.buffer)],{type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+}
+const xe=s=>String(s??'').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function wRun(text,o={}){
+  const pr=(o.b?'<w:b/>':'')+(o.color?`<w:color w:val="${o.color}"/>`:'')+(o.sz?`<w:sz w:val="${o.sz}"/><w:szCs w:val="${o.sz}"/>`:'');
+  const body=String(text??'').split(/\r?\n/).map(t=>`<w:t xml:space="preserve">${xe(t)}</w:t>`).join('<w:br/>');
+  return `<w:r>${pr?`<w:rPr>${pr}</w:rPr>`:''}${body}</w:r>`;
+}
+function wPara(runs,o={}){
+  const pr=(o.keepNext?'<w:keepNext/>':'')+(o.bullet?'<w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>':'')
+    +(o.border?'<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="2" w:color="2D5D8F"/></w:pBdr>':'')
+    +`<w:spacing w:before="${o.before||0}" w:after="${o.after??80}"/>`+(o.jc?`<w:jc w:val="${o.jc}"/>`:'');
+  return `<w:p><w:pPr>${pr}</w:pPr>${runs}</w:p>`;
+}
+function buildDocxBlob(d, relDocs){
+  const sec=(name,arr,mk)=>arr.length?wPara(wRun(name,{b:1,sz:24,color:'2D5D8F'}),{before:240,after:100,border:1,keepNext:1})+arr.map(mk).join(''):'';
+  const bl=t=>wPara(wRun(t),{bullet:1,after:60});
+  const cell=(w,inner,shade)=>`<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${shade?'<w:shd w:val="clear" w:color="auto" w:fill="F0EEE8"/>':''}<w:vAlign w:val="center"/></w:tcPr>${inner}</w:tc>`;
+  const rows=[['일시',fmtDate(d.date)],['장소',d.place||'-'],['참석자',(d.attendees||[]).join(', ')||'-'],['기록자',d.recorder||'-']];
+  const table=`<w:tbl><w:tblPr><w:tblW w:w="9638" w:type="dxa"/><w:tblBorders>${['top','left','bottom','right','insideH','insideV'].map(s=>`<w:${s} w:val="single" w:sz="4" w:space="0" w:color="BBBBBB"/>`).join('')}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:left w:w="110" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:right w:w="110" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid><w:gridCol w:w="1500"/><w:gridCol w:w="8138"/></w:tblGrid>`
+    +rows.map(([k,v])=>`<w:tr>${cell(1500,wPara(wRun(k,{b:1}),{after:0,jc:'center'}),1)}${cell(8138,wPara(wRun(v),{after:0}))}</w:tr>`).join('')+`</w:tbl>`;
+  const fu=(d.followups||[]).map(f=>typeof f==='string'?{text:f}:f);
+  const att=d.attachments||[];
+  const body=
+    wPara(wRun(d.title||'회의록',{b:1,sz:36}),{jc:'center',after:200})+table+
+    (d.summary?wPara(wRun('요약  ',{b:1,color:'2D5D8F'})+wRun(d.summary),{before:200,after:60}):'')+
+    sec('공지',d.notices||[],bl)+sec('토의사항',d.discussions||[],bl)+
+    sec('추후논의',fu,f=>wPara(wRun(f.resolved?'[해결] ':'[미결] ',{b:1,color:f.resolved?'2F7A4B':'A06B11'})+wRun(f.text),{bullet:1,after:60}))+
+    sec('결정',d.decisions||[],bl)+sec('기타',d.etc||[],bl)+
+    sec('관련 회의록',relDocs||[],x=>bl(`${x.title} (${fmtDate(x.date)})`))+
+    sec('첨부 자료',att,a=>bl(`${a.name} (${a.type==='handout'?'유인물':'사진'})`))+
+    wPara(wRun(`높은뜻안성교회 회의록 · 출력일 ${fmtDate(today())}`,{sz:18,color:'888888'}),{before:360,jc:'right'});
+  const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  return makeZip([
+    {name:'[Content_Types].xml',text:H+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/></Types>'},
+    {name:'_rels/.rels',text:H+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'},
+    {name:'word/_rels/document.xml.rels',text:H+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/></Relationships>'},
+    {name:'word/styles.xml',text:H+`<w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="맑은 고딕" w:hAnsi="맑은 고딕" w:eastAsia="맑은 고딕" w:cs="맑은 고딕"/><w:sz w:val="21"/><w:szCs w:val="21"/><w:lang w:val="ko-KR" w:eastAsia="ko-KR"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="80" w:line="320" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>`},
+    {name:'word/numbering.xml',text:H+`<w:numbering ${NS}><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="400" w:hanging="260"/></w:pPr><w:rPr><w:rFonts w:ascii="맑은 고딕" w:hAnsi="맑은 고딕" w:eastAsia="맑은 고딕"/></w:rPr></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num></w:numbering>`},
+    {name:'word/document.xml',text:H+`<w:document ${NS}><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`}
+  ]);
+}
+/* EXPORT-END */
+function exportDocx(){
+  const d=S.current; if(!d) return;
+  try{
+    const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
+    const blob=buildDocxBlob(d, relDocs);
+    const safe=(d.title||'회의록').replace(/[\\/:*?"<>|\r\n]+/g,' ').trim().slice(0,40);
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`회의록_${d.date||today()}_${safe}.docx`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    toast('Word 파일을 저장했습니다');
+  }catch(e){ toast('저장 실패: '+e.message); }
 }
 
 /* ───────── 수정 ───────── */
