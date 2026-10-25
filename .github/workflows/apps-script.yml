@@ -1,0 +1,68 @@
+# apps-script/ 폴더가 바뀌면 교회 계정 Apps Script 프로젝트에 코드를 올리고
+# 기존 웹앱 배포를 새 버전으로 갱신한다(URL 유지).
+#
+# 필요한 저장소 설정 (Settings → Secrets and variables → Actions)
+#   Secret   CLASPRC_JSON : 교회 계정으로 `clasp login` 한 뒤 생긴 .clasprc.json 내용 전체
+#   Variable SCRIPT_ID    : Apps Script 프로젝트 설정의 「스크립트 ID」
+# 둘 중 하나라도 없으면 아무것도 하지 않고 성공으로 끝난다.
+name: Deploy Apps Script
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps-script/**', '.github/workflows/apps-script.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apps-script
+  cancel-in-progress: false
+
+env:
+  DEPLOYMENT_ID: AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 설정 확인
+        id: check
+        env:
+          CLASPRC: ${{ secrets.CLASPRC_JSON }}
+          SCRIPT_ID: ${{ vars.SCRIPT_ID }}
+        run: |
+          if [ -z "$CLASPRC" ] || [ -z "$SCRIPT_ID" ]; then
+            echo "::notice::CLASPRC_JSON 또는 SCRIPT_ID가 없어 Apps Script 배포를 건너뜁니다."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.skip != 'true'
+        with:
+          node-version: 20
+
+      - name: 코드 올리기 + 기존 배포 갱신
+        if: steps.check.outputs.skip != 'true'
+        env:
+          CLASPRC: ${{ secrets.CLASPRC_JSON }}
+          SCRIPT_ID: ${{ vars.SCRIPT_ID }}
+        run: |
+          npm install -g @google/clasp@2.4.2
+          printf '%s' "$CLASPRC" > ~/.clasprc.json
+          cd apps-script
+          printf '{"scriptId":"%s","rootDir":"."}' "$SCRIPT_ID" > .clasp.json
+          clasp push --force
+          clasp deploy --deploymentId "$DEPLOYMENT_ID" --description "github ${GITHUB_SHA::7}"
+          rm -f ~/.clasprc.json
+
+      - name: 서버 응답 확인
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          sleep 5
+          out=$(curl -sSL "https://script.google.com/macros/s/$DEPLOYMENT_ID/exec")
+          echo "$out"
+          echo "$out" | grep -q '"ok":true' || { echo "::error::웹앱이 JSON을 돌려주지 않습니다(액세스 설정 확인)"; exit 1; }

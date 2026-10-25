@@ -6,12 +6,13 @@
  *   APP_ID            공용 아이디 (예: GW)
  *   APP_PASSWORD      공용 비밀번호 (예: 1003)
  *   CLAUDE_API_KEY    Anthropic API 키
- *   CLAUDE_MODEL      (선택) 기본 claude-haiku-5-5. 품질 올릴 때 claude-sonnet-5-5
+ *   CLAUDE_MODEL      (선택) 기본 claude-sonnet-5-5. 비용을 줄일 때 claude-haiku-5-5
  *   FIREBASE_PROJECT  (선택) 기본 meeting-minutes-6ccd2
  *   COLLECTION        (선택) 기본 meeting-minutes
  *   DRIVE_FOLDER_ID   (선택) 사진 보관 최상위 폴더 ID. 없으면 '회의록자료' 폴더를 자동 생성
  *
- * 배포: 웹 앱 > 실행 주체 '나' > 액세스 '모든 사용자'
+ * 배포: GitHub Actions(.github/workflows/apps-script.yml)가 저장소의 이 폴더를 push·기존 배포 갱신.
+ *       실행 주체·액세스는 appsscript.json의 webapp 설정(나 / 모든 사용자)을 따른다.
  */
 
 const PROPS = PropertiesService.getScriptProperties();
@@ -19,7 +20,7 @@ const CFG = {
   appId: PROPS.getProperty('APP_ID') || 'GW',
   appPassword: PROPS.getProperty('APP_PASSWORD') || '',
   claudeKey: PROPS.getProperty('CLAUDE_API_KEY') || '',
-  claudeModel: PROPS.getProperty('CLAUDE_MODEL') || 'claude-haiku-5-5',
+  claudeModel: PROPS.getProperty('CLAUDE_MODEL') || 'claude-sonnet-5-5',
   project: PROPS.getProperty('FIREBASE_PROJECT') || 'meeting-minutes-6ccd2',
   collection: PROPS.getProperty('COLLECTION') || 'meeting-minutes',
   driveFolderId: PROPS.getProperty('DRIVE_FOLDER_ID') || '',
