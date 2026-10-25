@@ -7,7 +7,7 @@
  *   APP_PASSWORD      공용 비밀번호 (예: 1003)
  *   CLAUDE_API_KEY    Anthropic API 키
  *   CLAUDE_MODEL      (선택) 기본 claude-haiku-5-5. 품질 올릴 때 claude-sonnet-5-5
- *   FIREBASE_PROJECT  (선택) 기본 jeahwan-apps
+ *   FIREBASE_PROJECT  (선택) 기본 meeting-minutes-6ccd2
  *   COLLECTION        (선택) 기본 meeting-minutes
  *   DRIVE_FOLDER_ID   (선택) 사진 보관 최상위 폴더 ID. 없으면 '회의록자료' 폴더를 자동 생성
  *
@@ -20,7 +20,7 @@ const CFG = {
   appPassword: PROPS.getProperty('APP_PASSWORD') || '',
   claudeKey: PROPS.getProperty('CLAUDE_API_KEY') || '',
   claudeModel: PROPS.getProperty('CLAUDE_MODEL') || 'claude-haiku-5-5',
-  project: PROPS.getProperty('FIREBASE_PROJECT') || 'jeahwan-apps',
+  project: PROPS.getProperty('FIREBASE_PROJECT') || 'meeting-minutes-6ccd2',
   collection: PROPS.getProperty('COLLECTION') || 'meeting-minutes',
   driveFolderId: PROPS.getProperty('DRIVE_FOLDER_ID') || '',
   recentForMatch: 30,

@@ -4,7 +4,7 @@
 
 - 프런트: `index.html` 단일 파일 (GitHub Pages)
 - 중계 서버: `apps-script/Code.gs` (Google Apps Script 웹앱)
-- 저장: Firebase(교회 계정 프로젝트, 스크립트 속성 `FIREBASE_PROJECT`) Firestore 컬렉션 `meeting-minutes` + 구글드라이브 `회의록자료` 폴더
+- 저장: Firebase `meeting-minutes-6ccd2`(교회 계정) Firestore 컬렉션 `meeting-minutes` + 구글드라이브 `회의록자료` 폴더
 
 ## 설치 순서 (처음 1회, 약 20분)
 
@@ -22,12 +22,12 @@
 | `APP_PASSWORD` | `1003` |
 | `CLAUDE_API_KEY` | Anthropic 콘솔에서 발급한 키 (`sk-ant-...`) |
 | `CLAUDE_MODEL` | (선택) 기본 `claude-haiku-5-5`. 품질 올리려면 `claude-sonnet-5-5` |
-| `FIREBASE_PROJECT` | (선택) 기본 `jeahwan-apps` |
+| `FIREBASE_PROJECT` | (선택) 기본 `meeting-minutes-6ccd2` |
 | `COLLECTION` | (선택) 기본 `meeting-minutes` |
 
 ### 3. Firestore 권한 확인
 Apps Script는 실행 계정(본인 구글 계정)의 권한으로 Firestore REST API를 호출합니다.
-- Firebase 프로젝트 `jeahwan-apps`의 소유자/편집자 계정과 **같은 구글 계정**으로 Apps Script를 만들어야 합니다.
+- Firebase 프로젝트 `meeting-minutes-6ccd2`의 소유자/편집자 계정(교회 구글 계정)과 **같은 구글 계정**으로 Apps Script를 만들어야 합니다.
 - Google Cloud 콘솔 → 해당 프로젝트 → **API 및 서비스 → 사용 설정된 API**에 `Cloud Firestore API`가 켜져 있어야 합니다(Firebase 프로젝트면 보통 켜져 있음).
 - Firestore 보안 규칙은 브라우저가 직접 접근하지 않으므로 전면 차단으로 둬도 됩니다.
 
