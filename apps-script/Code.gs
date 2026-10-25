@@ -9,7 +9,7 @@
  *   CLAUDE_MODEL      (선택) 기본 claude-sonnet-5-5. 비용을 줄일 때 claude-haiku-5-5
  *   FIREBASE_PROJECT  (선택) 기본 meeting-minutes-6ccd2
  *   COLLECTION        (선택) 기본 meeting-minutes
- *   DRIVE_FOLDER_ID   (선택) 사진 보관 최상위 폴더 ID. 없으면 '회의록자료' 폴더를 자동 생성
+ *   DRIVE_FOLDER_ID   (선택) 사진·자료 보관 최상위 폴더 ID. 없으면 '회의록자료' 폴더를 자동 생성
  *
  * 배포: GitHub Actions(.github/workflows/apps-script.yml)가 저장소의 이 폴더를 push·기존 배포 갱신.
  *       실행 주체·액세스는 appsscript.json의 webapp 설정(나 / 모든 사용자)을 따른다.
@@ -203,6 +203,8 @@ function normalizeDoc_(d) {
     topics: arr(d.topics).map(x => typeof x === 'string' ? { title: x, items: [] } : { title: String(x.title || ''), items: arr(x.items).map(String) }).filter(x => x.title || x.items.length),
     proposals: arr(d.proposals).map(x => typeof x === 'string' ? { item: x, action: '' } : { item: String(x.item || ''), action: String(x.action || '') }).filter(x => x.item || x.action),
     checks: arr(d.checks).map(x => typeof x === 'string' ? x : String(x.text || '')).filter(Boolean),
+    // v2.1: 첨부 자료(유인물·PDF·PPT 등) 내용 요약 — 회의록 5단
+    materials: arr(d.materials).map(x => ({ title: String(x.title || ''), source: String(x.source || ''), items: arr(x.items).map(String) })).filter(x => x.title || x.items.length),
     summary: String(d.summary || '').trim(),
     keywords: arr(d.keywords),
     related: arr(d.related),
@@ -279,22 +281,32 @@ function subFolder_(parent, name) {
   return it.hasNext() ? it.next() : parent.createFolder(name);
 }
 
+// v2.1: 사진뿐 아니라 PDF·PPTX·DOCX·HWPX 원본도 받는다(kind: image|pdf|doc).
+// 원본이 너무 커서 프런트가 data를 비워 보낸 문서는 파일 없이 추출 텍스트만 남긴다.
+// Firestore 문서 1MB 한도 때문에 추출 텍스트는 6만 자에서 자른다.
+const MAX_EXTRACT = 60000;
 function uploadImages_(date, docId, images) {
   const year = (date || '').slice(0, 4) || String(new Date().getFullYear());
-  const folder = subFolder_(subFolder_(rootFolder_(), year), docId);
+  let folder = null;
   return images.map((img, i) => {
-    const bytes = Utilities.base64Decode(img.data);
-    const name = img.name || ('image-' + (i + 1) + '.jpg');
-    const file = folder.createFile(Utilities.newBlob(bytes, img.mime || 'image/jpeg', name));
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    return {
-      driveFileId: file.getId(),
+    const kind = img.kind === 'pdf' || img.kind === 'doc' ? img.kind : 'image';
+    const name = img.name || ('file-' + (i + 1) + (kind === 'image' ? '.jpg' : ''));
+    const out = {
       name: name,
+      kind: kind,
       type: img.type === 'handout' ? 'handout' : 'photo',
-      extractedText: String(img.extractedText || ''),
-      url: 'https://drive.google.com/file/d/' + file.getId() + '/view',
-      thumb: 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1200',
+      extractedText: String(img.extractedText || '').slice(0, MAX_EXTRACT),
     };
+    if (img.data) {
+      if (!folder) folder = subFolder_(subFolder_(rootFolder_(), year), docId);
+      const bytes = Utilities.base64Decode(img.data);
+      const file = folder.createFile(Utilities.newBlob(bytes, img.mime || 'application/octet-stream', name));
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      out.driveFileId = file.getId();
+      out.url = 'https://drive.google.com/file/d/' + file.getId() + '/view';
+      out.thumb = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1200';
+    }
+    return out;
   });
 }
 
@@ -324,15 +336,22 @@ const SYSTEM_PROMPT = [
   'C. proposals (종합 제안): 회의에서 나온 결정·제안·다음 할 일을 표 형식으로. item은 짧은 명사구(예: "학년별 분리 편성"), action은 구체 실행 내용(담당·기한·수치가 있으면 포함). 보통 3~8개. 회의에서 안 나온 것을 지어내지 않는다.',
   'D. checks (확인이 필요한 사항): 음성 변환 판독이 불확실해 추정으로 적은 부분. 어느 발화자의 어떤 말인지 짚어서 한 줄씩. 예: "발화자 5의 \'다돌 돌봄센터\'가 맞는 명칭인지 확인 필요". 없으면 빈 배열.',
   '',
+  'E. materials (첨부 자료 내용): 회의에 첨부된 자료([자료 N]으로 표시된 유인물 사진·PDF·발표 슬라이드·문서)마다 한 항목.',
+  '   - index는 자료 번호 N, title은 자료 제목(자료 안의 제목, 없으면 내용을 나타내는 짧은 명사구).',
+  '   - items는 자료의 핵심 내용을 한 줄씩 6~20줄. 일정·금액·인원·장소·담당·안건·결정 요청 사항 같은 숫자와 고유명사는 빠뜨리지 않는다. 표는 핵심 행을 "항목: 값" 형태로 옮긴다.',
+  '   - 슬라이드 자료는 흐름 순서대로 정리하고, 필요하면 줄 앞에 "[슬라이드 3]"처럼 위치를 붙인다. 발표자 메모도 내용이 있으면 반영한다.',
+  '   - 자료 내용이 회의 발언과 이어지면 topics·proposals에도 반영하고, 그 줄 끝 출처에 "(자료 N)"을 붙인다. 예: "(발화자 2, 자료 1)".',
+  '   - 자료가 없으면 빈 배열.',
+  '',
   '그 밖의 항목:',
-  '6. 유인물 이미지가 있으면 본문 텍스트를 그대로 옮기고 표는 줄 단위로 정리해 handoutText에 넣는다. 유인물 내용이 회의 내용과 겹치면 topics·proposals에도 반영한다.',
+  '6. 유인물 사진(이미지 자료)은 본문 텍스트를 그대로 옮기고 표는 줄 단위로 정리해 handoutText에 넣는다(index는 자료 번호). PDF·슬라이드·문서 자료는 handoutText에 넣지 않는다.',
   '7. summary는 회의 전체를 한 문장(60자 이내)으로. keywords는 핵심어 5~10개(단체명·행사명·안건명 위주).',
   '8. date·place·attendees는 채록문이나 유인물에서 확인되는 경우에만 채우고, 사용자가 준 값이 있으면 그 값을 우선한다.',
   '9. recentMeetings 목록이 주어지면, 이번 회의의 제안·주제와 이어지는 과거 회의만 relatedCandidates에 넣고 reason에 근거를 한 줄 적는다. 관련 없으면 빈 배열.',
   '10. 출력은 JSON 하나만. 설명·코드펜스 없이 JSON 객체만 출력한다.',
   '',
   '출력 스키마:',
-  '{"date":"YYYY-MM-DD 또는 빈 문자열","place":"","attendees":[],"speakers":[{"speaker":"발화자 1","text":""}],"topics":[{"title":"","items":[""]}],"proposals":[{"item":"","action":""}],"checks":[""],"summary":"","keywords":[],"handoutText":[{"index":0,"text":""}],"relatedCandidates":[{"id":"","reason":""}]}',
+  '{"date":"YYYY-MM-DD 또는 빈 문자열","place":"","attendees":[],"speakers":[{"speaker":"발화자 1","text":""}],"topics":[{"title":"","items":[""]}],"proposals":[{"item":"","action":""}],"checks":[""],"materials":[{"index":1,"title":"","items":[""]}],"summary":"","keywords":[],"handoutText":[{"index":1,"text":""}],"relatedCandidates":[{"id":"","reason":""}]}',
 ].join('\n');
 
 function analyze_(body) {
@@ -343,11 +362,21 @@ function analyze_(body) {
   const meta = body.meta || {};
   const recent = recentForMatch_();
 
+  // v2.1: 자료 종류별로 Claude에 넘긴다 — 사진은 image, PDF는 document(그림·표까지 읽음),
+  //       PPTX·DOCX·HWPX는 브라우저에서 뽑은 텍스트(extractedText). 번호는 1부터, 프런트와 같은 순서.
   const userParts = [];
   const handouts = (body.images || []).filter(img => img.type === 'handout');
   handouts.forEach((img, i) => {
-    userParts.push({ type: 'text', text: '[유인물 이미지 ' + i + ']' });
-    userParts.push({ type: 'image', source: { type: 'base64', media_type: img.mime || 'image/jpeg', data: img.data } });
+    const label = '[자료 ' + (i + 1) + '] ' + (img.name || '');
+    if (img.kind === 'pdf' && img.data) {
+      userParts.push({ type: 'text', text: label + ' (PDF)' });
+      userParts.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: img.data }, title: img.name || ('자료 ' + (i + 1)) });
+    } else if (img.kind === 'doc') {
+      userParts.push({ type: 'text', text: label + ' (슬라이드·문서에서 뽑은 텍스트)\n' + String(img.extractedText || '(텍스트 없음)').slice(0, MAX_EXTRACT) });
+    } else if (img.data) {
+      userParts.push({ type: 'text', text: label + ' (유인물 사진)' });
+      userParts.push({ type: 'image', source: { type: 'base64', media_type: img.mime || 'image/jpeg', data: img.data } });
+    }
   });
 
   const userText = [
@@ -358,7 +387,7 @@ function analyze_(body) {
     JSON.stringify(recent),
     '',
     '## 채록문',
-    text || '(채록문 없음 — 유인물만 정리)',
+    text || '(채록문 없음 — 첨부 자료만 정리)',
   ].join('\n');
   userParts.push({ type: 'text', text: userText });
 
@@ -375,6 +404,11 @@ function analyze_(body) {
   const ids = recent.map(r => r.id);
   parsed.relatedCandidates = (parsed.relatedCandidates || []).filter(c => c && ids.indexOf(c.id) >= 0)
     .map(c => Object.assign(c, recent.find(r => r.id === c.id)));
+  // 자료 번호 → 파일 이름(source)을 붙여 둔다
+  parsed.materials = (parsed.materials || []).map(m => {
+    const src = handouts[Number(m.index) - 1];
+    return { index: Number(m.index) || 0, title: String(m.title || ''), source: src ? (src.name || '') : '', items: (m.items || []).map(String) };
+  });
   parsed.model = CFG.claudeModel;
   return parsed;
 }

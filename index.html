@@ -72,6 +72,8 @@
   .thumb img{width:100%;height:110px;object-fit:cover;display:block}
   .thumb .k{position:absolute;left:6px;top:6px;font-size:11px;padding:2px 6px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff}
   .thumb .x{position:absolute;right:4px;top:4px;background:rgba(0,0,0,.6);color:#fff;border:0;border-radius:999px;width:22px;height:22px;cursor:pointer}
+  .thumb .file{height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:26px 8px 28px;text-align:center;font-size:12px;color:var(--muted);word-break:break-all;text-decoration:none}
+  .thumb .file b{font-size:20px;color:var(--accent)}
   .thumb select{position:absolute;left:0;right:0;bottom:0;border:0;border-radius:0;font-size:12px;padding:4px;background:rgba(255,255,255,.95)}
   .overlay{position:fixed;inset:0;background:rgba(246,245,242,.85);display:none;align-items:center;justify-content:center;z-index:20;flex-direction:column;gap:12px;text-align:center;padding:20px}
   .overlay.on{display:flex}
@@ -124,7 +126,8 @@ const S = {
   view: 'list',
 };
 // 회의록 본문 4단 구성 (샘플 양식)
-const SEC = { speakers:'1. 개인별 발언 정리', topics:'2. 주제별 정리', proposals:'3. 종합 제안', checks:'4. 확인이 필요한 사항' };
+// v2.1: 5. 첨부 자료 내용(유인물 사진·PDF·PPT·문서를 AI가 요약) 추가 — 기존 1~4 번호는 그대로 둠
+const SEC = { speakers:'1. 개인별 발언 정리', topics:'2. 주제별 정리', proposals:'3. 종합 제안', checks:'4. 확인이 필요한 사항', materials:'5. 첨부 자료 내용' };
 const CIRC='①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳';
 const circ=i=>CIRC[i]||`(${i+1})`;
 // 저장된 문서/AI 결과를 한 형태로 맞춤 (문자열만 들어온 옛 데이터도 받아줌)
@@ -133,9 +136,10 @@ function normDoc(d){
   d.topics=(d.topics||[]).map(x=>typeof x==='string'?{title:x,items:[]}:{title:String(x.title||''),items:(x.items||[]).map(v=>String(v??''))});
   d.proposals=(d.proposals||[]).map(x=>typeof x==='string'?{item:x,action:''}:{item:String(x.item||''),action:String(x.action||'')});
   d.checks=(d.checks||[]).map(v=>typeof v==='string'?v:String(v.text||''));
+  d.materials=(d.materials||[]).map(x=>({title:String(x.title||''),source:String(x.source||''),items:(x.items||[]).map(v=>String(v??''))}));
   return d;
 }
-function introText(d){ return `본 문서는 ${fmtDate(d.date)} ${d.title||'회의'}의 녹음 채록문을 AI로 정리한 것입니다. 개인별 발언 정리, 주제별 정리, 종합 제안, 확인이 필요한 사항의 순서로 구성하였습니다.`; }
+function introText(d){ const m=(d.materials||[]).length; return `본 문서는 ${fmtDate(d.date)} ${d.title||'회의'}의 녹음 채록문${m?'과 첨부 자료':''}를 AI로 정리한 것입니다. 개인별 발언 정리, 주제별 정리, 종합 제안, 확인이 필요한 사항${m?', 첨부 자료 내용':''}의 순서로 구성하였습니다.`; }
 
 /* ───────── 유틸 ───────── */
 const $ = s => document.querySelector(s);
@@ -214,7 +218,7 @@ function matches(d,q){
   if(!q) return true;
   const hay=[d.title,d.date,d.place,d.recorder,d.summary,...(d.attendees||[]),...(d.keywords||[]),
     ...(d.speakers||[]).map(x=>x.text||x),...(d.topics||[]).flatMap(t=>[t.title,...(t.items||[])]),
-    ...(d.proposals||[]).flatMap(x=>[x.item,x.action]),...(d.checks||[])].join(' ').toLowerCase();
+    ...(d.proposals||[]).flatMap(x=>[x.item,x.action]),...(d.checks||[]),...(d.materials||[]).flatMap(t=>[t.title,t.source,...(t.items||[])])].join(' ').toLowerCase();
   return q.toLowerCase().split(/\s+/).filter(Boolean).every(w=>hay.includes(w));
 }
 function drawList(){
@@ -226,7 +230,7 @@ function drawList(){
       <div class="t">${esc(d.title)}</div>
       <div class="m">${fmtDate(d.date)}${d.place?' · '+esc(d.place):''}${d.recorder?' · 기록 '+esc(d.recorder):''}</div>
       ${d.summary?`<div class="s">${esc(d.summary)}</div>`:''}
-      <div>${(d.topics||[]).length?`<span class="tag">주제 ${d.topics.length}</span>`:''}${(d.proposals||[]).length?`<span class="tag ok">제안 ${d.proposals.length}</span>`:''}${(d.checks||[]).length?`<span class="tag warn">확인 ${d.checks.length}</span>`:''}${(d.related||[]).length?`<span class="tag">관련 ${d.related.length}</span>`:''}</div>
+      <div>${(d.topics||[]).length?`<span class="tag">주제 ${d.topics.length}</span>`:''}${(d.proposals||[]).length?`<span class="tag ok">제안 ${d.proposals.length}</span>`:''}${(d.checks||[]).length?`<span class="tag warn">확인 ${d.checks.length}</span>`:''}${(d.materials||[]).length?`<span class="tag">자료 ${d.materials.length}</span>`:''}${(d.related||[]).length?`<span class="tag">관련 ${d.related.length}</span>`:''}</div>
     </div>`;
   }).join('');
 }
@@ -256,9 +260,9 @@ function renderNew(){
     <input type="file" id="fTxt" accept=".txt,text/plain" style="margin-top:8px" onchange="loadTxt(this)">
   </div>
   <div class="card">
-    <h2>사진 첨부 <span class="muted" style="font-weight:400">(선택)</span></h2>
-    <p class="muted" style="margin:0 0 8px">유인물은 AI가 문서로 읽어 정리에 반영하고, 자료 사진은 보관만 합니다.</p>
-    <input type="file" id="fImg" accept="image/*" multiple onchange="addImages(this)">
+    <h2>자료 첨부 <span class="muted" style="font-weight:400">(선택)</span></h2>
+    <p class="muted" style="margin:0 0 8px">유인물 사진·PDF·PPT(.pptx)·Word(.docx)·한글(.hwpx)을 올리면 AI가 읽어 회의록 「5. 첨부 자료 내용」에 정리하고, 원본은 드라이브에 보관합니다. 옛 형식(.ppt·.hwp·.doc)은 PDF로 저장해 올려주세요.</p>
+    <input type="file" id="fImg" accept="${FILE_ACCEPT}" multiple onchange="addImages(this)">
     <div class="thumbs" id="thumbs"></div>
   </div>
   <div class="actions">
@@ -269,23 +273,138 @@ function loadTxt(inp){
   const f=inp.files[0]; if(!f) return;
   const rd=new FileReader(); rd.onload=()=>{ $('#fText').value=rd.result; toast('텍스트를 불러왔습니다'); }; rd.readAsText(f,'utf-8');
 }
+/* ───────── 자료 첨부 (v2.1: 사진 + PDF·PPTX·DOCX·HWPX) ─────────
+   - 사진: 줄여서 JPEG로. AI가 이미지로 읽음
+   - PDF: 그대로 보냄. AI가 문서로 읽음(그림·표 포함)
+   - PPTX·DOCX·HWPX: 브라우저에서 글자만 뽑아 AI에 보냄(그림 속 글자는 못 읽음 → 필요하면 PDF로).
+     원본 파일은 저장할 때 드라이브에 보관 */
+const FILE_ACCEPT='image/*,.pdf,application/pdf,.pptx,.docx,.hwpx';
+const MB=1024*1024, MAX_PDF=20*MB, MAX_KEEP=20*MB, MAX_TEXT=60000;
+const DOC_MIME={pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',hwpx:'application/hwp+zip'};
+const extOf=n=>(String(n).match(/\.([^.]+)$/)||['',''])[1].toLowerCase();
+const KIND_LABEL=it=>it.kind==='pdf'?'PDF':it.kind==='doc'?({pptx:'PPT',docx:'Word',hwpx:'한글'}[extOf(it.name)]||'문서'):'';
 async function addImages(inp){
   for (const f of inp.files){
+    const ext=extOf(f.name);
     try{
-      const img = await shrinkImage(f, 1600, 0.82);
-      S.images.push({name:f.name.replace(/\.[^.]+$/,'')+'.jpg', mime:'image/jpeg', data:img.base64, preview:img.dataUrl, type:'handout'});
-    }catch(e){ toast('이미지 처리 실패: '+f.name); }
+      if(f.type.startsWith('image/')){
+        const img = await shrinkImage(f, 1600, 0.82);
+        S.images.push({name:f.name.replace(/\.[^.]+$/,'')+'.jpg', kind:'image', mime:'image/jpeg', data:img.base64, preview:img.dataUrl, type:'handout'});
+      }else if(ext==='pdf'){
+        if(f.size>MAX_PDF){ toast(`${f.name}: PDF가 ${Math.round(f.size/MB)}MB입니다. 20MB 이하로 줄이거나 나눠서 올려주세요`); continue; }
+        S.images.push({name:f.name, kind:'pdf', mime:'application/pdf', data:await fileB64(f), size:f.size, type:'handout'});
+      }else if(DOC_MIME[ext]){
+        const buf=await f.arrayBuffer();
+        let text=ext==='pptx'?await pptxText(buf):ext==='docx'?await docxText(buf):await hwpxText(buf);
+        if(text.length>MAX_TEXT) text=text.slice(0,MAX_TEXT)+'\n…(이후 생략)';
+        // 원본이 너무 크면(그림 많은 PPT 등) 글자만 남기고 원본 보관은 생략
+        const keep=f.size<=MAX_KEEP;
+        S.images.push({name:f.name, kind:'doc', mime:DOC_MIME[ext], data:keep?await fileB64(f):'', size:f.size, extractedText:text, type:'handout'});
+        if(text.replace(/\s|\[슬라이드 \d+\]/g,'').length<30) toast(`${f.name}: 글자가 거의 없습니다(그림 위주?). PDF로 저장해 올리면 그림 속 글자까지 읽습니다`);
+        else if(!keep) toast(`${f.name}: 파일이 커서 원본은 보관하지 않고 글자만 정리합니다`);
+      }else if(['ppt','doc','hwp'].includes(ext)){
+        toast(`${f.name}: 옛 형식은 읽지 못합니다. PDF로 저장해 올려주세요`);
+      }else toast(`${f.name}: 지원하지 않는 형식입니다`);
+    }catch(e){ toast('자료 처리 실패: '+f.name+' ('+e.message+')'); }
   }
   inp.value=''; drawThumbs();
 }
+function fileB64(f){ return new Promise((res,rej)=>{ const rd=new FileReader(); rd.onload=()=>res(String(rd.result).split(',')[1]||''); rd.onerror=rej; rd.readAsDataURL(f); }); }
+// 첨부 칸 하나(새 회의록·수정·확인 화면 공용)
+function fileBox(name,label){ return `<div class="file"><b>${esc(label)}</b>${esc(name)}</div>`; }
 function drawThumbs(){
   $('#thumbs').innerHTML = S.images.map((im,i)=>`
-    <div class="thumb"><img src="${im.preview}" alt="">
+    <div class="thumb">${im.kind==='image'?`<img src="${im.preview}" alt="">`:fileBox(im.name,KIND_LABEL(im))}
       <button class="x" onclick="S.images.splice(${i},1);drawThumbs()">×</button>
       <select onchange="S.images[${i}].type=this.value">
-        <option value="handout" ${im.type==='handout'?'selected':''}>유인물(텍스트화)</option>
-        <option value="photo" ${im.type==='photo'?'selected':''}>자료 사진(보관만)</option>
+        <option value="handout" ${im.type==='handout'?'selected':''}>${im.kind==='image'?'유인물(텍스트화)':'AI 정리'}</option>
+        <option value="photo" ${im.type==='photo'?'selected':''}>${im.kind==='image'?'자료 사진(보관만)':'보관만'}</option>
       </select></div>`).join('');
+}
+
+/* ── zip 풀기(라이브러리 없이, 브라우저 내장 DecompressionStream) ── */
+async function unzip(buf, want){
+  const u8=new Uint8Array(buf), dv=new DataView(buf), dec=new TextDecoder();
+  let e=u8.length-22; while(e>=0 && dv.getUint32(e,true)!==0x06054b50) e--;
+  if(e<0) throw new Error('파일 형식이 올바르지 않습니다');
+  const n=dv.getUint16(e+10,true); let p=dv.getUint32(e+16,true); const out={};
+  for(let i=0;i<n;i++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    const method=dv.getUint16(p+10,true), csize=dv.getUint32(p+20,true), nl=dv.getUint16(p+28,true), xl=dv.getUint16(p+30,true), cl=dv.getUint16(p+32,true), lo=dv.getUint32(p+42,true);
+    const name=dec.decode(u8.subarray(p+46,p+46+nl)); p+=46+nl+xl+cl;
+    if(!want(name)) continue;
+    const st=lo+30+dv.getUint16(lo+26,true)+dv.getUint16(lo+28,true), data=u8.subarray(st,st+csize);
+    let raw;
+    if(method===0) raw=data;
+    else if(method===8){
+      if(typeof DecompressionStream==='undefined') throw new Error('이 브라우저는 파일 풀기를 지원하지 않습니다. PDF로 올려주세요');
+      raw=new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    } else continue;
+    out[name]=dec.decode(raw);
+  }
+  return out;
+}
+const xmlDoc=t=>new DOMParser().parseFromString(t||'<x/>','application/xml');
+const tags=(node,local)=>[...node.getElementsByTagNameNS('*',local)];
+const up=(node,local)=>{ let x=node.parentNode; while(x&&x.localName!==local) x=x.parentNode; return x; };
+// 문단(pName) 단위로 글자(tName)를 모음. 표 안 문단은 skip 집합으로 뺄 수 있음
+function paraLines(root,pName,tName,skip){
+  return tags(root,pName).filter(p=>!(skip&&skip.has(p))).map(p=>tags(p,tName).filter(t=>up(t,pName)===p).map(t=>t.textContent).join('').trim()).filter(Boolean);
+}
+// 표: 행마다 칸을 " | "로 이음
+function tableLines(root,tbl,tr,tc,pName,tName,skip){
+  const lines=[];
+  for(const tb of tags(root,tbl)){
+    if(up(tb,tbl)) continue; // 표 안의 표는 바깥 표에서 처리
+    for(const r of tags(tb,tr).filter(r=>up(r,tbl)===tb)){
+      const cells=tags(r,tc).filter(c=>up(c,tr)===r).map(c=>{ const ps=tags(c,pName); ps.forEach(x=>skip.add(x)); return ps.map(x=>tags(x,tName).filter(t=>up(t,pName)===x).map(t=>t.textContent).join('')).join(' ').trim(); });
+      if(cells.some(Boolean)) lines.push('| '+cells.join(' | ')+' |');
+    }
+  }
+  return lines;
+}
+async function pptxText(buf){
+  const f=await unzip(buf, n=>/^ppt\/(slides|notesSlides)\/(_rels\/)?[^/]+\.xml(\.rels)?$/.test(n)||n==='ppt/presentation.xml'||n==='ppt/_rels/presentation.xml.rels');
+  const num=s=>+(s.match(/(\d+)\.xml$/)||[0,0])[1];
+  let order=[];
+  try{ // 실제 슬라이드 순서(presentation.xml) — 순서를 바꾼 발표 자료 대비
+    const map={}; for(const r of tags(xmlDoc(f['ppt/_rels/presentation.xml.rels']),'Relationship')) map[r.getAttribute('Id')]=r.getAttribute('Target');
+    for(const sd of tags(xmlDoc(f['ppt/presentation.xml']),'sldId')){
+      const t=map[sd.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id')];
+      if(t) order.push(t.startsWith('/')?t.slice(1):'ppt/'+t.replace(/^\.\//,''));
+    }
+  }catch(e){}
+  order=order.filter(n=>f[n]);
+  if(!order.length) order=Object.keys(f).filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a,b)=>num(a)-num(b));
+  return order.map((name,i)=>{
+    const d=xmlDoc(f[name]), skip=new Set();
+    const lines=[...tableLines(d,'tbl','tr','tc','p','t',skip)];
+    lines.unshift(...paraLines(d,'p','t',skip));
+    // 발표자 메모(본문 칸만)
+    const rel=f[name.replace(/slides\/(slide\d+\.xml)$/,'slides/_rels/$1.rels')];
+    const nt=rel&&(rel.match(/notesSlides\/(notesSlide\d+\.xml)/)||[])[1];
+    if(nt&&f['ppt/notesSlides/'+nt]){
+      const nd=xmlDoc(f['ppt/notesSlides/'+nt]);
+      const memo=tags(nd,'sp').filter(sp=>(tags(sp,'ph')[0]||{getAttribute:()=>null}).getAttribute('type')==='body').flatMap(sp=>paraLines(sp,'p','t'));
+      if(memo.length) lines.push('(발표자 메모) '+memo.join(' / '));
+    }
+    return `[슬라이드 ${i+1}]\n`+lines.join('\n');
+  }).join('\n\n');
+}
+async function docxText(buf){
+  const f=await unzip(buf, n=>n==='word/document.xml');
+  const d=xmlDoc(f['word/document.xml']), body=tags(d,'body')[0]||d, out=[];
+  for(const el of body.children){
+    if(el.localName==='p'){ const t=tags(el,'t').filter(x=>up(x,'p')===el).map(x=>x.textContent).join('').trim(); if(t) out.push(t); }
+    else if(el.localName==='tbl'){ const tmp=document.implementation.createDocument(null,'r'); tmp.documentElement.appendChild(tmp.importNode(el,true)); out.push(...tableLines(tmp,'tbl','tr','tc','p','t',new Set())); }
+    else out.push(...paraLines(el,'p','t'));
+  }
+  return out.join('\n');
+}
+async function hwpxText(buf){
+  const f=await unzip(buf, n=>/^Contents\/section\d+\.xml$/.test(n));
+  const names=Object.keys(f).sort((a,b)=>+a.match(/(\d+)\.xml$/)[1]-+b.match(/(\d+)\.xml$/)[1]);
+  return names.map(n=>{ const d=xmlDoc(f[n]), skip=new Set(); const tb=tableLines(d,'tbl','tr','tc','p','t',skip); return [...paraLines(d,'p','t',skip),...tb].join('\n'); }).join('\n');
 }
 function shrinkImage(file, maxSide, quality){
   return new Promise((res,rej)=>{
@@ -310,20 +429,24 @@ function readMeta(){
 async function runAnalyze(){
   const meta=readMeta(); const text=$('#fText').value.trim();
   if(!text && !S.images.some(i=>i.type==='handout')){ toast('채록문을 넣어주세요'); return; }
+  // AI에 보내는 것: 사진·PDF는 원본, PPT·문서는 뽑은 글자만. 요청 한도(약 30MB) 안쪽으로
+  const forAi=S.images.map(i=>({name:i.name,kind:i.kind,mime:i.mime,type:i.type,data:i.type==='handout'&&i.kind!=='doc'?i.data:'',extractedText:i.kind==='doc'?i.extractedText:''}));
+  const aiBytes=forAi.reduce((a,i)=>a+(i.data||'').length,0);
+  if(aiBytes>28*MB){ toast(`AI에 보낼 자료가 너무 큽니다(${Math.round(aiBytes*0.75/MB)}MB). PDF·사진 일부를 「보관만」으로 바꾸거나 빼주세요`); return; }
   if(!meta.recorder){ toast('기록자 이름을 넣어주세요'); $('#fRec').focus(); return; }
   localStorage.setItem('mm_last', JSON.stringify({place:meta.place, recorder:meta.recorder}));
   try{
     busy(true,'AI가 회의록을 정리하고 있습니다…');
-    const r = await api('analyze',{text, meta, images:S.images.map(i=>({name:i.name,mime:i.mime,data:i.data,type:i.type}))});
+    const r = await api('analyze',{text, meta, images:forAi});
     const a=r.result;
-    // 유인물 텍스트를 첨부 메타에 연결
+    // 유인물 사진의 인식 텍스트를 첨부 메타에 연결(자료 번호는 1부터, AI 정리 대상만 셈)
     const hand=S.images.filter(i=>i.type==='handout');
-    (a.handoutText||[]).forEach(h=>{ if(hand[h.index]) hand[h.index].extractedText=h.text||''; });
+    (a.handoutText||[]).forEach(h=>{ const it=hand[(+h.index||0)-1]; if(it&&it.kind==='image') it.extractedText=h.text||''; });
     S.draft = {
       title: meta.title || (a.summary ? a.summary.slice(0,30) : '회의록'),
       date: meta.date || a.date || today(), place: meta.place || a.place || '',
       attendees: meta.attendees.length? meta.attendees : (a.attendees||[]), recorder: meta.recorder,
-      speakers:a.speakers||[], topics:a.topics||[], proposals:a.proposals||[], checks:a.checks||[],
+      speakers:a.speakers||[], topics:a.topics||[], proposals:a.proposals||[], checks:a.checks||[], materials:a.materials||[],
       summary:a.summary||'', keywords:a.keywords||[], related:[], rawText:text,
       _candidates:a.relatedCandidates||[], _model:a.model
     };
@@ -339,6 +462,7 @@ function editListHtml(key, arr){
   let body='';
   if(key==='speakers') body=arr.map((v,i)=>`<div class="pair"><input type="text" class="sp" value="${esc(v.speaker)}" placeholder="발화자"><textarea class="tx" rows="${rows(v.text)}">${esc(v.text)}</textarea>${x(i)}</div>`).join('');
   else if(key==='topics') body=arr.map((v,i)=>`<div class="topic-edit"><div class="item"><input type="text" class="tt" value="${esc(v.title)}" placeholder="주제">${x(i)}</div><textarea class="ti" rows="${rows(v.items.join('\n'))}" placeholder="항목은 한 줄에 하나, 끝에 (발화자 N)">${esc(v.items.join('\n'))}</textarea></div>`).join('');
+  else if(key==='materials') body=arr.map((v,i)=>`<div class="topic-edit" data-src="${esc(v.source)}"><div class="item"><input type="text" class="tt" value="${esc(v.title)}" placeholder="자료 제목">${x(i)}</div>${v.source?`<div class="muted" style="margin:0 0 4px">원본: ${esc(v.source)}</div>`:''}<textarea class="ti" rows="${rows(v.items.join('\n'))}" placeholder="핵심 내용은 한 줄에 하나">${esc(v.items.join('\n'))}</textarea></div>`).join('');
   else if(key==='proposals') body=arr.map((v,i)=>`<div class="pair"><input type="text" class="pi" value="${esc(v.item)}" placeholder="항목"><textarea class="pa" rows="${rows(v.action)}" placeholder="실행 내용">${esc(v.action)}</textarea>${x(i)}</div>`).join('');
   else body=arr.map((v,i)=>`<div class="item"><textarea rows="${rows(v)}">${esc(v)}</textarea>${x(i)}</div>`).join('');
   return `<div class="edit-list" id="el_${key}">${body}<button class="add" onclick="addItem('${key}')">＋ 항목 추가</button></div>`;
@@ -352,11 +476,12 @@ function collectForm(d){
   d.topics=q('#el_topics .topic-edit').map(r=>({title:r.querySelector('.tt').value.trim(),items:r.querySelector('.ti').value.split('\n').map(t=>t.replace(/^\s*[•\-·]\s*/,'').trim()).filter(Boolean)})).filter(v=>v.title||v.items.length);
   d.proposals=q('#el_proposals .pair').map(r=>({item:r.querySelector('.pi').value.trim(),action:r.querySelector('.pa').value.trim()})).filter(v=>v.item||v.action);
   d.checks=q('#el_checks textarea').map(t=>t.value.trim()).filter(Boolean);
+  d.materials=q('#el_materials .topic-edit').map(r=>({title:r.querySelector('.tt').value.trim(),source:r.dataset.src||'',items:r.querySelector('.ti').value.split('\n').map(t=>t.replace(/^\s*[•\-·]\s*/,'').trim()).filter(Boolean)})).filter(v=>v.title||v.items.length);
   d.related=q('.cand:checked').map(c=>c.value);
   return d;
 }
 function syncDraftFromForm(){ try{ collectForm(S.draft); }catch(e){} }
-const EMPTY={speakers:()=>({speaker:'',text:''}),topics:()=>({title:'',items:[]}),proposals:()=>({item:'',action:''}),checks:()=>''};
+const EMPTY={speakers:()=>({speaker:'',text:''}),topics:()=>({title:'',items:[]}),proposals:()=>({item:'',action:''}),checks:()=>'',materials:()=>({title:'',source:'',items:[]})};
 function removeItem(k,i){ syncDraftFromForm(); S.draft[k].splice(i,1); rerenderSections(); }
 function addItem(k){ syncDraftFromForm(); S.draft[k].push(EMPTY[k]()); rerenderSections(); const el=document.querySelectorAll(`#el_${k} input, #el_${k} textarea`); el[el.length-1]?.focus(); }
 function rerenderSections(){ Object.keys(SEC).forEach(k=>{ $(`#el_${k}`).outerHTML=editListHtml(k,S.draft[k]||[]); }); }
@@ -389,14 +514,19 @@ function formHtml(d, candidates, existingRelated){
     ${cands.map(c=>`<div class="related-cand"><input type="checkbox" class="cand" value="${c.id}" checked><div><b>${esc(c.title||c.id)}</b> <span class="meta-line">${fmtDate(c.date)}</span><div class="muted">${esc(c.reason||'')}</div></div></div>`).join('')}
   </div>`;
 }
+// 자료에서 뽑은 원문(유인물 사진 인식·PPT/문서 글자) — 길어서 접어 둠
+function extractedHtml(list){
+  const xs=(list||[]).filter(a=>a.extractedText);
+  return xs.length?`<h3>자료 원문 텍스트</h3>${xs.map(a=>`<details style="margin-bottom:6px"><summary class="muted" style="cursor:pointer">${esc(a.name)}</summary><pre class="raw" style="margin-top:6px">${esc(a.extractedText)}</pre></details>`).join('')}`:'';
+}
 function renderReview(){
   $('#hTitle').textContent='정리 결과 확인';
   const d=S.draft;
   $('#app').innerHTML = `
   <p class="muted" style="margin:0 0 10px">AI 정리 결과입니다. 틀린 곳을 고친 뒤 저장하세요.${d._model?' · 모델 '+esc(d._model):''}</p>
   ${formHtml(d, d._candidates, [])}
-  ${S.images.length?`<div class="card"><h2>첨부 사진 ${S.images.length}장</h2><div class="thumbs">${S.images.map(im=>`<div class="thumb"><img src="${im.preview}"><span class="k">${im.type==='handout'?'유인물':'사진'}</span></div>`).join('')}</div>
-    ${S.images.some(i=>i.extractedText)?`<h3>유인물 인식 텍스트</h3>${S.images.filter(i=>i.extractedText).map(i=>`<pre class="raw">${esc(i.extractedText)}</pre>`).join('')}`:''}</div>`:''}
+  ${S.images.length?`<div class="card"><h2>첨부 자료 ${S.images.length}건</h2><div class="thumbs">${S.images.map(im=>`<div class="thumb">${im.kind==='image'?`<img src="${im.preview}">`:fileBox(im.name,KIND_LABEL(im))}<span class="k">${im.type==='handout'?(im.kind==='image'?'유인물':'AI 정리'):'보관만'}</span></div>`).join('')}</div>
+    ${extractedHtml(S.images)}</div>`:''}
   <div class="card"><h3 style="margin-top:0">원본 채록문</h3><pre class="raw">${esc(d.rawText||'(없음)')}</pre></div>
   <div class="actions">
     <button class="btn" onclick="go('new')">← 다시 입력</button>
@@ -408,8 +538,8 @@ async function saveNew(){
   if(!d.title){ toast('제목을 넣어주세요'); return; }
   try{
     busy(true,'저장 중…');
-    const images=S.images.map(i=>({name:i.name,mime:i.mime,data:i.data,type:i.type,extractedText:i.extractedText||''}));
-    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,summary:d.summary,keywords:d.keywords,related:d.related,rawText:d.rawText};
+    const images=S.images.map(i=>({name:i.name,kind:i.kind,mime:i.mime,data:i.data,type:i.type,extractedText:i.extractedText||''}));
+    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related,rawText:d.rawText};
     const r=await api('save',{doc:payload, images});
     S.images=[]; S.draft=null; toast('저장했습니다');
     go('detail', r.id);
@@ -435,10 +565,16 @@ async function renderDetail(id){
     ${d.topics.length?`<div class="card"><h2 class="sec-t">${SEC.topics}</h2>${d.topics.map((t,i)=>`<div class="topic">${circ(i)} ${esc(t.title)}</div><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`).join('')}</div>`:''}
     ${d.proposals.length?`<div class="card"><h2 class="sec-t">${SEC.proposals}</h2><table class="tb"><thead><tr><th style="width:44px">No.</th><th style="width:30%">항목</th><th>실행 내용</th></tr></thead><tbody>${d.proposals.map((v,i)=>`<tr><td class="n">${i+1}</td><td class="k" style="white-space:pre-wrap">${esc(v.item)}</td><td>${esc(v.action)}</td></tr>`).join('')}</tbody></table></div>`:''}
     ${d.checks.length?`<div class="card"><h2 class="sec-t">${SEC.checks}</h2><p class="muted" style="margin:0 0 8px">아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.</p><ul class="bul">${d.checks.map(v=>`<li>${esc(v)}</li>`).join('')}</ul></div>`:''}
-    ${!d.speakers.length&&!d.topics.length&&!d.proposals.length?'<div class="card"><p class="muted" style="margin:0">정리된 내용이 없습니다. 수정에서 내용을 넣거나, 새 회의록으로 다시 정리하세요.</p></div>':''}
+    ${d.materials.length?`<div class="card"><h2 class="sec-t">${SEC.materials}</h2>${d.materials.map((t,i)=>`<div class="topic">${circ(i)} ${esc(t.title)}${t.source?` <span class="meta-line">(${esc(t.source)})</span>`:''}</div><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`).join('')}</div>`:''}
+    ${!d.speakers.length&&!d.topics.length&&!d.proposals.length&&!d.materials.length?'<div class="card"><p class="muted" style="margin:0">정리된 내용이 없습니다. 수정에서 내용을 넣거나, 새 회의록으로 다시 정리하세요.</p></div>':''}
     ${(d.attachments||[]).length?`<div class="card"><h2>첨부 ${d.attachments.length}건</h2>
-      <div class="thumbs">${d.attachments.map(a=>`<a class="thumb" href="${a.url}" target="_blank" rel="noopener"><img src="${a.thumb}" alt="${esc(a.name)}" loading="lazy"><span class="k">${a.type==='handout'?'유인물':'사진'}</span></a>`).join('')}</div>
-      ${d.attachments.some(a=>a.extractedText)?`<h3>유인물 인식 텍스트</h3>${d.attachments.filter(a=>a.extractedText).map(a=>`<pre class="raw">${esc(a.extractedText)}</pre>`).join('')}`:''}
+      <div class="thumbs">${d.attachments.map(a=>{
+        const img=!a.kind||a.kind==='image';
+        const inner=img?`<img src="${a.thumb}" alt="${esc(a.name)}" loading="lazy">`:fileBox(a.name,KIND_LABEL(a)+(a.url?'':' (원본 없음)'));
+        const k=`<span class="k">${img?(a.type==='handout'?'유인물':'사진'):KIND_LABEL(a)}</span>`;
+        return a.url?`<a class="thumb" href="${a.url}" target="_blank" rel="noopener">${inner}${k}</a>`:`<div class="thumb">${inner}${k}</div>`;
+      }).join('')}</div>
+      ${extractedHtml(d.attachments)}
     </div>`:''}
     <div class="card"><h2>관련 회의록</h2>
       ${relDocs.length? relDocs.map(x=>`<div class="list-item" onclick="go('detail','${x.id}')"><div class="t">${esc(x.title)}</div><div class="m">${fmtDate(x.date)}</div>${x.summary?`<div class="s">${esc(x.summary)}</div>`:''}</div>`).join('') : '<p class="muted" style="margin:0">연결된 회의록이 없습니다.</p>'}
@@ -461,6 +597,7 @@ function copyText(){
   if(d.topics.length){ lines.push('## '+SEC.topics); d.topics.forEach((t,i)=>{ lines.push(`### ${circ(i)} ${t.title}`); t.items.forEach(v=>lines.push('- '+v)); lines.push(''); }); }
   if(d.proposals.length){ lines.push('## '+SEC.proposals); d.proposals.forEach((v,i)=>lines.push(`${i+1}. ${v.item} — ${v.action}`)); lines.push(''); }
   if(d.checks.length){ lines.push('## '+SEC.checks); d.checks.forEach(v=>lines.push('- '+v)); lines.push(''); }
+  if(d.materials.length){ lines.push('## '+SEC.materials); d.materials.forEach((t,i)=>{ lines.push(`### ${circ(i)} ${t.title}${t.source?' ('+t.source+')':''}`); t.items.forEach(v=>lines.push('- '+v)); lines.push(''); }); }
   navigator.clipboard.writeText(lines.join('\n')).then(()=>toast('복사했습니다'),()=>toast('복사 실패'));
 }
 async function delDoc(id){
@@ -527,8 +664,9 @@ function buildDocxBlob(d, relDocs){
     (d.topics.length? H1('2. 주제별 정리')+d.topics.map((t,i)=>wPara(wRun(`${circ(i)} ${t.title}`,{b:1,sz:24,color:TOPIC}),{before:200,after:80,keepNext:1})+t.items.map(bl).join('')).join(''):'')+
     (d.proposals.length? H1('3. 종합 제안')+table([700,2800,6138],['No.','항목','실행 내용'],d.proposals.map((v,i)=>[{x:wPara(wRun(String(i+1),{b:1}),{after:0,jc:'center'})},{x:wPara(wRun(v.item,{b:1}),{after:0})},{x:wPara(wRun(v.action),{after:0})}])):'')+
     (d.checks.length? H1('4. 확인이 필요한 사항')+wPara(wRun('아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.',{sz:20,color:'444444'}),{after:80})+d.checks.map(bl).join(''):'')+
+    (d.materials.length? H1('5. 첨부 자료 내용')+d.materials.map((t,i)=>wPara(wRun(`${circ(i)} ${t.title}`,{b:1,sz:24,color:TOPIC})+(t.source?wRun(`  (${t.source})`,{sz:18,color:'888888'}):''),{before:200,after:80,keepNext:1})+t.items.map(bl).join('')).join(''):'')+
     ((relDocs||[]).length? H1('관련 회의록')+relDocs.map(x=>bl(`${x.title} (${fmtDate(x.date)})`)).join(''):'')+
-    ((d.attachments||[]).length? H1('첨부 자료')+d.attachments.map(a=>bl(`${a.name} (${a.type==='handout'?'유인물':'사진'})`)).join(''):'')+
+    ((d.attachments||[]).length? H1('첨부 자료')+d.attachments.map(a=>bl(`${a.name} (${(a.kind&&a.kind!=='image')?KIND_LABEL(a):a.type==='handout'?'유인물':'사진'})`)).join(''):'')+
     wPara(wRun(`작성일: ${fmtDate(today())}`,{sz:18,color:'888888'}),{before:360,jc:'right',border:0,topBorder:1});
   const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
   const H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
@@ -580,7 +718,7 @@ async function renderEdit(id){
     <select id="addRel"><option value="">선택…</option>${others.map(x=>`<option value="${x.id}">${esc(fmtDate(x.date)+' '+x.title)}</option>`).join('')}</select>
     <div class="actions"><button class="btn" onclick="addRelated()">연결 추가</button></div>
   </div>
-  <div class="card"><h2>사진 추가</h2><input type="file" id="fImg" accept="image/*" multiple onchange="addImages(this)"><div class="thumbs" id="thumbs"></div></div>
+  <div class="card"><h2>자료 추가</h2><p class="muted" style="margin:0 0 8px">여기서 추가한 자료는 드라이브에 보관만 됩니다(내용 정리는 위 「5. 첨부 자료 내용」에 직접 적어주세요).</p><input type="file" id="fImg" accept="${FILE_ACCEPT}" multiple onchange="addImages(this)"><div class="thumbs" id="thumbs"></div></div>
   <div class="actions">
     <button class="btn" onclick="go('detail','${id}')">취소</button>
     <button class="btn primary" style="flex:1" onclick="saveEdit('${id}')">저장</button>
@@ -598,8 +736,8 @@ async function saveEdit(id){
   const d=collectForm(S.draft);
   try{
     busy(true,'저장 중…');
-    const images=S.images.map(i=>({name:i.name,mime:i.mime,data:i.data,type:i.type}));
-    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,summary:d.summary,keywords:d.keywords,related:d.related};
+    const images=S.images.map(i=>({name:i.name,kind:i.kind,mime:i.mime,data:i.data,type:i.type,extractedText:i.extractedText||''}));
+    const payload={title:d.title,date:d.date,place:d.place,attendees:d.attendees,recorder:d.recorder,speakers:d.speakers,topics:d.topics,proposals:d.proposals,checks:d.checks,materials:d.materials,summary:d.summary,keywords:d.keywords,related:d.related};
     await api('update',{id, doc:payload, images});
     S.images=[]; toast('수정했습니다');
     const r=await api('list',{limit:300}); S.items=r.items||[];
