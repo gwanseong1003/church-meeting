@@ -77,6 +77,12 @@
   .thumb select{position:absolute;left:0;right:0;bottom:0;border:0;border-radius:0;font-size:12px;padding:4px;background:rgba(255,255,255,.95)}
   .overlay{position:fixed;inset:0;background:rgba(246,245,242,.85);display:none;align-items:center;justify-content:center;z-index:20;flex-direction:column;gap:12px;text-align:center;padding:20px}
   .overlay.on{display:flex}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:25;padding:16px}
+  .modal .card{width:100%;max-width:380px;margin:0}
+  .modal label.chk{display:flex;align-items:center;gap:10px;font-size:15px;color:var(--ink);margin:0;padding:9px 2px;border-bottom:1px solid var(--line);cursor:pointer}
+  .modal label.chk input{width:18px;height:18px}
+  .tb td ul.bul{padding-left:16px}
+  .tb td ul.bul li{margin:2px 0}
   .spinner{width:36px;height:36px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:.2s;z-index:30;pointer-events:none;max-width:90vw}
@@ -139,7 +145,16 @@ function normDoc(d){
   d.materials=(d.materials||[]).map(x=>({title:String(x.title||''),source:String(x.source||''),items:(x.items||[]).map(v=>String(v??''))}));
   return d;
 }
-function introText(d){ const m=(d.materials||[]).length; return `본 문서는 ${fmtDate(d.date)} ${d.title||'회의'}의 녹음 채록문${m?'과 첨부 자료':''}를 AI로 정리한 것입니다. 개인별 발언 정리, 주제별 정리, 종합 제안, 확인이 필요한 사항${m?', 첨부 자료 내용':''}의 순서로 구성하였습니다.`; }
+// keys: 넣을 본문 칸(없으면 내용 있는 칸 전부). Word 저장에서 칸을 뺄 수 있어서 소개 문장도 거기에 맞춘다
+const secName=k=>SEC[k].replace(/^\d+\.\s*/,'');
+function introText(d,keys){
+  keys=keys||Object.keys(SEC).filter(k=>(d[k]||[]).length);
+  const m=keys.includes('materials');
+  return `본 문서는 ${fmtDate(d.date)} ${d.title||'회의'}의 녹음 채록문${m?'과 첨부 자료를':'을'} AI로 정리한 것입니다.`+(keys.length?` ${keys.map(secName).join(', ')}의 순서로 구성하였습니다.`:'');
+}
+// v2.2: 개인별 발언은 개조식(줄바꿈으로 구분). 예전 서술형(한 덩어리)도 그대로 받아줌
+const spLines=t=>String(t||'').split(/\n+/).map(x=>x.replace(/^\s*[•\-·]\s*/,'').trim()).filter(Boolean);
+const spCell=t=>{ const l=spLines(t); return l.length>1?`<ul class="bul">${l.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`:esc(l[0]||''); };
 
 /* ───────── 유틸 ───────── */
 const $ = s => document.querySelector(s);
@@ -460,7 +475,7 @@ const rows=t=>Math.max(2,String(t||'').split('\n').length+1);
 function editListHtml(key, arr){
   const x=i=>`<button class="x" onclick="removeItem('${key}',${i})">×</button>`;
   let body='';
-  if(key==='speakers') body=arr.map((v,i)=>`<div class="pair"><input type="text" class="sp" value="${esc(v.speaker)}" placeholder="발화자"><textarea class="tx" rows="${rows(v.text)}">${esc(v.text)}</textarea>${x(i)}</div>`).join('');
+  if(key==='speakers') body=arr.map((v,i)=>`<div class="pair"><input type="text" class="sp" value="${esc(v.speaker)}" placeholder="발화자"><textarea class="tx" rows="${rows(v.text)}" placeholder="한 줄에 한 내용(개조식)">${esc(v.text)}</textarea>${x(i)}</div>`).join('');
   else if(key==='topics') body=arr.map((v,i)=>`<div class="topic-edit"><div class="item"><input type="text" class="tt" value="${esc(v.title)}" placeholder="주제">${x(i)}</div><textarea class="ti" rows="${rows(v.items.join('\n'))}" placeholder="항목은 한 줄에 하나, 끝에 (발화자 N)">${esc(v.items.join('\n'))}</textarea></div>`).join('');
   else if(key==='materials') body=arr.map((v,i)=>`<div class="topic-edit" data-src="${esc(v.source)}"><div class="item"><input type="text" class="tt" value="${esc(v.title)}" placeholder="자료 제목">${x(i)}</div>${v.source?`<div class="muted" style="margin:0 0 4px">원본: ${esc(v.source)}</div>`:''}<textarea class="ti" rows="${rows(v.items.join('\n'))}" placeholder="핵심 내용은 한 줄에 하나">${esc(v.items.join('\n'))}</textarea></div>`).join('');
   else if(key==='proposals') body=arr.map((v,i)=>`<div class="pair"><input type="text" class="pi" value="${esc(v.item)}" placeholder="항목"><textarea class="pa" rows="${rows(v.action)}" placeholder="실행 내용">${esc(v.action)}</textarea>${x(i)}</div>`).join('');
@@ -484,6 +499,19 @@ function syncDraftFromForm(){ try{ collectForm(S.draft); }catch(e){} }
 const EMPTY={speakers:()=>({speaker:'',text:''}),topics:()=>({title:'',items:[]}),proposals:()=>({item:'',action:''}),checks:()=>'',materials:()=>({title:'',source:'',items:[]})};
 function removeItem(k,i){ syncDraftFromForm(); S.draft[k].splice(i,1); rerenderSections(); }
 function addItem(k){ syncDraftFromForm(); S.draft[k].push(EMPTY[k]()); rerenderSections(); const el=document.querySelectorAll(`#el_${k} input, #el_${k} textarea`); el[el.length-1]?.focus(); }
+// v2.2: 예전 서술형 발언 정리를 개조식으로(AI). 결과는 화면에만 넣고, 저장은 사용자가 확인 후
+async function bulletizeSpeakers(){
+  syncDraftFromForm();
+  const sp=(S.draft.speakers||[]).filter(v=>v.text);
+  if(!sp.length){ toast('바꿀 발언 정리가 없습니다'); return; }
+  try{
+    busy(true,'개조식으로 바꾸는 중…');
+    const r=await api('bulletize',{speakers:sp});
+    const by={}; (r.speakers||[]).forEach(x=>{ by[x.speaker]=x.text; });
+    let n=0; S.draft.speakers.forEach(v=>{ if(by[v.speaker]){ v.text=by[v.speaker]; n++; } });
+    rerenderSections(); toast(n?`${n}명 바꿨습니다. 확인 후 저장하세요`:'바뀐 것이 없습니다');
+  }catch(e){ toast(e.message); } finally{ busy(false); }
+}
 function rerenderSections(){ Object.keys(SEC).forEach(k=>{ $(`#el_${k}`).outerHTML=editListHtml(k,S.draft[k]||[]); }); }
 
 function formHtml(d, candidates, existingRelated){
@@ -505,7 +533,7 @@ function formHtml(d, candidates, existingRelated){
   </div>
   <div class="card">
     <h2>회의 내용</h2>
-    ${Object.entries(SEC).map(([k,name])=>`<div class="sec-label">${name}</div>${editListHtml(k,d[k]||[])}`).join('')}
+    ${Object.entries(SEC).map(([k,name])=>`<div class="sec-label">${name}</div>${k==='speakers'?`<button class="btn" style="margin:0 0 8px 8px;padding:5px 10px;font-size:13px" onclick="bulletizeSpeakers()">AI로 개조식 바꾸기</button>`:''}${editListHtml(k,d[k]||[])}`).join('')}
   </div>
   <div class="card">
     <h2>관련 회의록</h2>
@@ -561,7 +589,7 @@ async function renderDetail(id){
       <p class="doc-intro">${esc(introText(d))}${d.summary?'<br>'+esc(d.summary):''}</p>
       <div>${(d.keywords||[]).map(k=>`<span class="tag">${esc(k)}</span>`).join('')}</div>
     </div>
-    ${d.speakers.length?`<div class="card"><h2 class="sec-t">${SEC.speakers}</h2><table class="tb"><thead><tr><th style="width:100px">발언자</th><th>발언 내용</th></tr></thead><tbody>${d.speakers.map(v=>`<tr><td class="k">${esc(v.speaker)}</td><td>${esc(v.text)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${d.speakers.length?`<div class="card"><h2 class="sec-t">${SEC.speakers}</h2><table class="tb"><thead><tr><th style="width:100px">발언자</th><th>발언 내용</th></tr></thead><tbody>${d.speakers.map(v=>`<tr><td class="k">${esc(v.speaker)}</td><td>${spCell(v.text)}</td></tr>`).join('')}</tbody></table></div>`:''}
     ${d.topics.length?`<div class="card"><h2 class="sec-t">${SEC.topics}</h2>${d.topics.map((t,i)=>`<div class="topic">${circ(i)} ${esc(t.title)}</div><ul class="bul">${t.items.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`).join('')}</div>`:''}
     ${d.proposals.length?`<div class="card"><h2 class="sec-t">${SEC.proposals}</h2><table class="tb"><thead><tr><th style="width:44px">No.</th><th style="width:30%">항목</th><th>실행 내용</th></tr></thead><tbody>${d.proposals.map((v,i)=>`<tr><td class="n">${i+1}</td><td class="k" style="white-space:pre-wrap">${esc(v.item)}</td><td>${esc(v.action)}</td></tr>`).join('')}</tbody></table></div>`:''}
     ${d.checks.length?`<div class="card"><h2 class="sec-t">${SEC.checks}</h2><p class="muted" style="margin:0 0 8px">아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.</p><ul class="bul">${d.checks.map(v=>`<li>${esc(v)}</li>`).join('')}</ul></div>`:''}
@@ -581,7 +609,7 @@ async function renderDetail(id){
     </div>
     ${d.rawText?`<div class="card"><details><summary class="muted" style="cursor:pointer">원본 채록문 보기</summary><pre class="raw" style="margin-top:8px;max-height:none">${esc(d.rawText)}</pre></details></div>`:''}
     <div class="actions">
-      <button class="btn primary" onclick="exportDocx()">Word 저장 (.docx)</button>
+      <button class="btn primary" onclick="exportDialog()">Word 저장 (.docx)</button>
       <button class="btn" onclick="window.print()">인쇄 / PDF</button>
       <button class="btn" onclick="copyText()">텍스트 복사</button>
       <button class="btn" onclick="go('edit','${d.id}')">수정</button>
@@ -593,7 +621,7 @@ function copyText(){
   const d=S.current; if(!d) return;
   const lines=[`# ${d.title}`,`일시: ${fmtDate(d.date)}${d.place?'  장소: '+d.place:''}`,`참석: ${(d.attendees||[]).join(', ')}  기록: ${d.recorder||''}`,''];
   if(d.summary) lines.push(d.summary,'');
-  if(d.speakers.length){ lines.push('## '+SEC.speakers); d.speakers.forEach(v=>lines.push(`- ${v.speaker}: ${v.text.replace(/\n/g,'\n  ')}`)); lines.push(''); }
+  if(d.speakers.length){ lines.push('## '+SEC.speakers); d.speakers.forEach(v=>{ const l=spLines(v.text); if(l.length>1){ lines.push(`- ${v.speaker}`); l.forEach(x=>lines.push('  - '+x)); } else lines.push(`- ${v.speaker}: ${l[0]||''}`); }); lines.push(''); }
   if(d.topics.length){ lines.push('## '+SEC.topics); d.topics.forEach((t,i)=>{ lines.push(`### ${circ(i)} ${t.title}`); t.items.forEach(v=>lines.push('- '+v)); lines.push(''); }); }
   if(d.proposals.length){ lines.push('## '+SEC.proposals); d.proposals.forEach((v,i)=>lines.push(`${i+1}. ${v.item} — ${v.action}`)); lines.push(''); }
   if(d.checks.length){ lines.push('## '+SEC.checks); d.checks.forEach(v=>lines.push('- '+v)); lines.push(''); }
@@ -645,7 +673,7 @@ function wPara(runs,o={}){
     +`<w:spacing w:before="${o.before||0}" w:after="${o.after??80}"/>`+(o.jc?`<w:jc w:val="${o.jc}"/>`:'');
   return `<w:p><w:pPr>${pr}</w:pPr>${runs}</w:p>`;
 }
-function buildDocxBlob(d, relDocs){
+function buildDocxBlob(d, relDocs, o={}){
   normDoc(d);
   const BLUE='2F5A8B', TOPIC='3A74B0';
   const H1=(t)=>wPara(wRun(t,{b:1,sz:28,color:BLUE}),{before:320,after:120,keepNext:1});
@@ -656,17 +684,24 @@ function buildDocxBlob(d, relDocs){
     +`<w:tr><w:trPr><w:tblHeader/></w:trPr>${head.map((h,i)=>cell(widths[i],wPara(wRun(h,{b:1}),{after:0}),'DCE6F1')).join('')}</w:tr>`
     +rows.map(r=>`<w:tr><w:trPr><w:cantSplit/></w:trPr>${r.map((c,i)=>cell(widths[i],c.x,c.fill)).join('')}</w:tr>`).join('')+`</w:tbl>`;
   const sub=[fmtDate(d.date), d.place, (d.attendees||[]).length?'참석 '+d.attendees.join(', '):'', d.recorder?'기록 '+d.recorder:''].filter(Boolean).join(' · ');
+  // v2.2: o.keys(넣을 본문 칸)·o.intro·o.related·o.attach로 칸을 고름. 뺀 칸이 있으면 번호를 1부터 다시 매김
+  const keys=(o.keys||Object.keys(SEC)).filter(k=>(d[k]||[]).length);
+  const HS=k=>H1(`${keys.indexOf(k)+1}. ${secName(k)}`);
+  const spCellX=t=>{ const l=spLines(t); return l.length>1?l.map((v,i)=>wPara(wRun(v),{bullet:1,after:i===l.length-1?0:40})).join(''):wPara(wRun(l[0]||''),{after:0}); };
+  const part={
+    speakers:()=>HS('speakers')+table([1500,8138],['발언자','발언 내용'],d.speakers.map(v=>[{x:wPara(wRun(v.speaker,{b:1}),{after:0}),fill:'F3F2EE'},{x:spCellX(v.text)}])),
+    topics:()=>HS('topics')+d.topics.map((t,i)=>wPara(wRun(`${circ(i)} ${t.title}`,{b:1,sz:24,color:TOPIC}),{before:200,after:80,keepNext:1})+t.items.map(bl).join('')).join(''),
+    proposals:()=>HS('proposals')+table([700,2800,6138],['No.','항목','실행 내용'],d.proposals.map((v,i)=>[{x:wPara(wRun(String(i+1),{b:1}),{after:0,jc:'center'})},{x:wPara(wRun(v.item,{b:1}),{after:0})},{x:wPara(wRun(v.action),{after:0})}])),
+    checks:()=>HS('checks')+wPara(wRun('아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.',{sz:20,color:'444444'}),{after:80})+d.checks.map(bl).join(''),
+    materials:()=>HS('materials')+d.materials.map((t,i)=>wPara(wRun(`${circ(i)} ${t.title}`,{b:1,sz:24,color:TOPIC})+(t.source?wRun(`  (${t.source})`,{sz:18,color:'888888'}):''),{before:200,after:80,keepNext:1})+t.items.map(bl).join('')).join(''),
+  };
   const body=
     wPara(wRun(d.title||'회의록',{b:1,sz:40,color:BLUE}),{jc:'center',before:200,after:80})+
     wPara(wRun(sub,{sz:20,color:'666666'}),{jc:'center',after:200,border:1})+
-    wPara(wRun(introText(d)+(d.summary?'\n'+d.summary:''),{sz:20,color:'444444'}),{before:160,after:120})+
-    (d.speakers.length? H1('1. 개인별 발언 정리')+table([1500,8138],['발언자','발언 내용'],d.speakers.map(v=>[{x:wPara(wRun(v.speaker,{b:1}),{after:0}),fill:'F3F2EE'},{x:wPara(wRun(v.text),{after:0})}])):'')+
-    (d.topics.length? H1('2. 주제별 정리')+d.topics.map((t,i)=>wPara(wRun(`${circ(i)} ${t.title}`,{b:1,sz:24,color:TOPIC}),{before:200,after:80,keepNext:1})+t.items.map(bl).join('')).join(''):'')+
-    (d.proposals.length? H1('3. 종합 제안')+table([700,2800,6138],['No.','항목','실행 내용'],d.proposals.map((v,i)=>[{x:wPara(wRun(String(i+1),{b:1}),{after:0,jc:'center'})},{x:wPara(wRun(v.item,{b:1}),{after:0})},{x:wPara(wRun(v.action),{after:0})}])):'')+
-    (d.checks.length? H1('4. 확인이 필요한 사항')+wPara(wRun('아래 항목은 음성 변환 판독이 불확실하여 추정으로 기재한 부분입니다. 확인 후 수정이 필요합니다.',{sz:20,color:'444444'}),{after:80})+d.checks.map(bl).join(''):'')+
-    (d.materials.length? H1('5. 첨부 자료 내용')+d.materials.map((t,i)=>wPara(wRun(`${circ(i)} ${t.title}`,{b:1,sz:24,color:TOPIC})+(t.source?wRun(`  (${t.source})`,{sz:18,color:'888888'}):''),{before:200,after:80,keepNext:1})+t.items.map(bl).join('')).join(''):'')+
-    ((relDocs||[]).length? H1('관련 회의록')+relDocs.map(x=>bl(`${x.title} (${fmtDate(x.date)})`)).join(''):'')+
-    ((d.attachments||[]).length? H1('첨부 자료')+d.attachments.map(a=>bl(`${a.name} (${(a.kind&&a.kind!=='image')?KIND_LABEL(a):a.type==='handout'?'유인물':'사진'})`)).join(''):'')+
+    (o.intro!==false? wPara(wRun(introText(d,keys)+(d.summary?'\n'+d.summary:''),{sz:20,color:'444444'}),{before:160,after:120}):'')+
+    keys.map(k=>part[k]()).join('')+
+    (o.related!==false&&(relDocs||[]).length? H1('관련 회의록')+relDocs.map(x=>bl(`${x.title} (${fmtDate(x.date)})`)).join(''):'')+
+    (o.attach!==false&&(d.attachments||[]).length? H1('첨부 자료')+d.attachments.map(a=>bl(`${a.name} (${(a.kind&&a.kind!=='image')?KIND_LABEL(a):a.type==='handout'?'유인물':'사진'})`)).join(''):'')+
     wPara(wRun(`작성일: ${fmtDate(today())}`,{sz:18,color:'888888'}),{before:360,jc:'right',border:0,topBorder:1});
   const NS='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
   const H='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
@@ -682,11 +717,37 @@ function buildDocxBlob(d, relDocs){
   ]);
 }
 /* EXPORT-END */
-async function exportDocx(){
+/* Word 저장 전에 넣을 칸 고르기 (v2.2). 고른 칸은 이 기기에 기억 */
+function docxOptList(d){
+  const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
+  return [['intro','소개 문장·한 줄 요약',true],
+    ...Object.keys(SEC).map(k=>[k,secName(k),(d[k]||[]).length>0]),
+    ['related','관련 회의록',relDocs.length>0],['attach','첨부 자료 목록',(d.attachments||[]).length>0]].filter(x=>x[2]);
+}
+function exportDialog(){
+  const d=S.current; if(!d) return;
+  let saved=null; try{ saved=JSON.parse(localStorage.getItem('mm_docx_off')||'null'); }catch(e){}
+  const off=new Set(saved||[]);
+  const m=document.createElement('div'); m.className='modal'; m.id='docxModal';
+  m.onclick=e=>{ if(e.target===m) m.remove(); };
+  m.innerHTML=`<div class="card"><h2>Word에 넣을 항목</h2>
+    ${docxOptList(d).map(([k,n])=>`<label class="chk"><input type="checkbox" value="${k}" ${off.has(k)?'':'checked'}>${esc(n)}</label>`).join('')}
+    <p class="muted" style="margin:10px 0 0">뺀 항목이 있으면 번호를 1부터 다시 매깁니다. 고른 항목은 다음에도 기억합니다.</p>
+    <div class="actions"><button class="btn" onclick="$('#docxModal').remove()">취소</button><button class="btn primary" style="flex:1" onclick="exportDocxChosen()">저장</button></div></div>`;
+  document.body.appendChild(m);
+}
+function exportDocxChosen(){
+  const boxes=[...document.querySelectorAll('#docxModal input[type=checkbox]')];
+  const on=new Set(boxes.filter(b=>b.checked).map(b=>b.value)), offList=boxes.filter(b=>!b.checked).map(b=>b.value);
+  try{ localStorage.setItem('mm_docx_off',JSON.stringify(offList)); }catch(e){}
+  $('#docxModal').remove();
+  exportDocx({keys:Object.keys(SEC).filter(k=>on.has(k)), intro:on.has('intro'), related:on.has('related'), attach:on.has('attach')});
+}
+async function exportDocx(o={}){
   const d=S.current; if(!d) return;
   try{
     const relDocs=(d.related||[]).map(rid=>S.items.find(x=>x.id===rid)).filter(Boolean);
-    const blob=buildDocxBlob(d, relDocs);
+    const blob=buildDocxBlob(d, relDocs, o);
     const safe=(d.title||'회의록').replace(/[\\/:*?"<>|\r\n]+/g,' ').trim().slice(0,40);
     const fname=`회의록_${d.date||today()}_${safe}.docx`;
     // 폰: 브라우저 다운로드는 앱(카톡 등) 안 브라우저나 문서 앱 연결 문제로 '지원하지 않는 파일'이 뜨기 쉬워

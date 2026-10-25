@@ -45,6 +45,7 @@ function doPost(e) {
       case 'list':    return json_({ ok: true, items: listDocs_(body.limit || 200) });
       case 'get':     return json_({ ok: true, item: getDoc_(body.id) });
       case 'analyze': return json_({ ok: true, result: analyze_(body) });
+      case 'bulletize': return json_({ ok: true, speakers: bulletize_(body) });
       case 'save':    return json_({ ok: true, id: saveDoc_(body) });
       case 'update':  return json_({ ok: true, id: updateDoc_(body) });
       case 'delete':  deleteDoc_(body.id); return json_({ ok: true });
@@ -324,8 +325,9 @@ const SYSTEM_PROMPT = [
   '5. 채록문에 나온 숫자·날짜·금액·인원·장소·대안·찬반 이유 같은 구체 내용은 빠뜨리지 않는다.',
   '',
   '구성:',
-  'A. speakers (개인별 발언 정리): 발화자마다 한 항목. speaker는 라벨 그대로("발화자 3"), text에는 그 사람이 회의 전체에서 말한 내용을 요약한다.',
-  '   - 주장·제안·근거·구체 수치를 담고, 여러 주제를 말했으면 주제 순서대로 문장을 이어 쓴다. 긴 발언자는 5~10문장, 짧은 발언자는 1~2문장.',
+  'A. speakers (개인별 발언 정리): 발화자마다 한 항목. speaker는 라벨 그대로("발화자 3"), text에는 그 사람이 회의 전체에서 말한 내용을 개조식으로 요약한다.',
+  '   - text는 한 줄에 한 내용인 개조식 줄들을 줄바꿈(\\n)으로 이어 붙인 문자열. 줄 앞에 •, -, 번호 같은 기호는 붙이지 않는다. 각 줄은 "~함", "~제안", "~필요"처럼 끝맺는다.',
+  '   - 주장·제안·근거·구체 수치를 담고, 여러 주제를 말했으면 주제 순서대로 줄을 쓴다. 긴 발언자는 5~12줄, 짧은 발언자는 1~3줄.',
   '   - 진행자(보통 발화자 1)는 진행 멘트·순서 안내는 빼고 내용 있는 발언만 요약한다.',
   '   - 맞장구·대답("네", "아 그거구나")만 한 발화자는 넣지 않는다.',
   '   - 발화자 번호 순으로 정렬한다.',
@@ -432,11 +434,11 @@ function recentForMatch_() {
 // 토의사항을 자세히 쓰게 한 뒤(v1.2) 긴 회의(채록문 4만 자대)는 8000토큰에서 잘렸다 → 넉넉히
 const MAX_OUT = 20000;
 
-function callClaude_(userParts, strict) {
+function callClaude_(userParts, strict, system) {
   const payload = {
     model: CFG.claudeModel,
     max_tokens: MAX_OUT,
-    system: SYSTEM_PROMPT + (strict ? '\n\n중요: 반드시 유효한 JSON 객체 하나만 출력하라. 다른 문자는 절대 넣지 마라.' : ''),
+    system: (system || SYSTEM_PROMPT) + (strict ? '\n\n중요: 반드시 유효한 JSON 객체 하나만 출력하라. 다른 문자는 절대 넣지 마라.' : ''),
     messages: [{ role: 'user', content: userParts }],
   };
   const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
@@ -450,6 +452,26 @@ function callClaude_(userParts, strict) {
   const data = JSON.parse(res.getContentText() || '{}');
   if (code >= 300) throw new Error('Claude ' + code + ': ' + (data.error && data.error.message || res.getContentText().slice(0, 300)));
   return { text: (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n'), stop: data.stop_reason };
+}
+
+// v2.2: 이미 저장된 회의록(서술형 발언 정리)을 개조식으로 바꾼다. 채록문은 다시 보내지 않음(비용↓)
+const BULLET_PROMPT = [
+  '당신은 한국어 회의록 편집자입니다. 발화자별 발언 요약(서술형 문장)을 개조식으로 바꿉니다.',
+  '규칙: 1) 내용을 더하거나 빼지 않는다. 숫자·날짜·금액·고유명사·[?] 표시는 그대로 둔다. 2) 한 줄에 한 내용. 3) 평서문, 존대 없이 "~함", "~제안", "~필요"로 끝맺는다. 4) 줄 앞에 기호를 붙이지 않는다. 5) 발화자 라벨은 그대로.',
+  '출력은 JSON 하나만: {"speakers":[{"speaker":"발화자 1","lines":["",""]}]}',
+].join('\n');
+function bulletize_(body) {
+  if (!CFG.claudeKey) throw new Error('서버에 CLAUDE_API_KEY가 설정되지 않았습니다');
+  const sp = (body.speakers || []).map(x => ({ speaker: String(x.speaker || ''), text: String(x.text || '') })).filter(x => x.text);
+  if (!sp.length) throw new Error('바꿀 발언 정리가 없습니다');
+  let parsed = null, lastErr = null;
+  for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+    const r = callClaude_([{ type: 'text', text: JSON.stringify({ speakers: sp }) }], attempt === 1, BULLET_PROMPT);
+    if (r.stop === 'max_tokens') throw new Error('발언 정리가 길어 응답이 잘렸습니다');
+    try { parsed = parseJson_(r.text); } catch (e) { lastErr = e; }
+  }
+  if (!parsed) throw new Error('AI 응답을 해석하지 못했습니다: ' + (lastErr && lastErr.message));
+  return (parsed.speakers || []).map(x => ({ speaker: String(x.speaker || ''), text: (x.lines || []).map(l => String(l).replace(/^\s*[•\-·]\s*/, '').trim()).filter(Boolean).join('\n') }));
 }
 
 function parseJson_(raw) {
