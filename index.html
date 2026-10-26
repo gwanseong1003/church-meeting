@@ -114,6 +114,7 @@
   .tag.dept{background:#ece7f6;color:#5a3f8f}
   .tag.lock{background:#f1e9e7;color:var(--danger)}
   .list-item.locked .t{color:var(--muted)}
+  .list-item .no{display:inline-block;min-width:2.2em;margin-right:6px;color:var(--muted);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums}
   .dept-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .lock-hint{font-size:12px;color:var(--muted);margin:4px 0 0}
   .search input{flex:1}
@@ -172,7 +173,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbx1EqEWcLeOX4ldD4JSwbm1pwFsgwBJHx6p1ozx5k2ThRUKI4WU1C5IzkByVg9l1p3x/exec';
 
 /* 앱 버전 — 고칠 때마다 올린다(상태.md 「현재 버전」과 같게) */
-const APP_VERSION = 'v3.7';
+const APP_VERSION = 'v3.8';
 document.getElementById('hVer').textContent = APP_VERSION;
 
 /* ───────── 상태 ───────── */
@@ -307,8 +308,15 @@ async function renderList(){
   try{
     const r = await api('list',{limit:300});
     S.items = r.items || [];
+    numberItems();
     drawList();
   }catch(e){ $('#listBox').innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+}
+// v3.8: 일련번호 — 회의 날짜 오래된 순 1번부터(같은 날은 먼저 만든 것이 앞). 부서·검색으로 걸러도 번호는 그대로.
+// DB에 저장하지 않고 목록을 불러올 때마다 매김 → 지운 회의록이 있으면 뒤 번호가 당겨짐.
+function numberItems(){
+  const key=d=>[d.date||'', d.createdAt||'', d.id].join('|');
+  [...S.items].sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0).forEach((d,i)=>{ d._no=i+1; });
 }
 function matches(d,q){
   if(!q) return true;
@@ -336,10 +344,10 @@ function drawList(){
   if(!rows.length){ $('#listBox').innerHTML=`<div class="empty">${!S.items.length?'아직 회의록이 없습니다. 새 회의록을 만들어보세요.':q?'검색 결과가 없습니다':'이 부서의 회의록이 없습니다'}</div>`; return; }
   $('#listBox').innerHTML = rows.map(d=>{
     if(d.isPrivate) return `<div class="list-item locked" onclick="go('detail','${d.id}')">
-      <div class="t">🔒 ${esc([d.dept||'부서 미지정', fmtDate(d.date)].join(' · '))}</div>
+      <div class="t"><span class="no">${d._no}.</span>🔒 ${esc([d.dept||'부서 미지정', fmtDate(d.date)].join(' · '))}</div>
     </div>`;
     return `<div class="list-item" onclick="go('detail','${d.id}')">
-      <div class="t">${esc(d.title)}</div>
+      <div class="t"><span class="no">${d._no}.</span>${esc(d.title)}</div>
       <div class="m">${d.dept?`<span class="tag dept">${esc(d.dept)}</span> `:''}${fmtDate(d.date)}${d.place?' · '+esc(d.place):''}${d.recorder?' · 기록 '+esc(d.recorder):''}</div>
       ${d.summary?`<div class="s">${esc(d.summary)}</div>`:''}
       <div>${(d.topics||[]).length?`<span class="tag">주제 ${d.topics.length}</span>`:''}${(d.proposals||[]).length?`<span class="tag ok">제안 ${d.proposals.length}</span>`:''}${(d.checks||[]).length?`<span class="tag warn">확인 ${d.checks.length}</span>`:''}${(d.materials||[]).length?`<span class="tag">자료 ${d.materials.length}</span>`:''}</div>

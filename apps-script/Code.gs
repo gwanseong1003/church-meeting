@@ -110,7 +110,7 @@ function openDoc_(id, pass) {
 }
 function outDoc_(doc) { const o = Object.assign({}, doc); delete o.passHash; o.isPrivate = !!o.isPrivate; return o; }
 function listView_(o) {
-  if (o.isPrivate) return { id: o.id, date: o.date, dept: o.dept || '', isPrivate: true };
+  if (o.isPrivate) return { id: o.id, date: o.date, dept: o.dept || '', createdAt: o.createdAt || '', isPrivate: true }; // v3.8: createdAt은 일련번호 순서용
   return outDoc_(o);
 }
 // newPass가 문자열로 오면 공개/비공개를 정한다(빈 문자열 = 공개)
